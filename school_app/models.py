@@ -61,8 +61,9 @@ class Branche(models.Model):
 
 class Classe(models.Model):
     nom = models.CharField(max_length=100)
-    niveau = models.CharField(max_length=50)
-    branche = models.ForeignKey(Branche, on_delete=models.CASCADE, related_name='classes')
+    niveau = models.CharField(max_length=50, null=True, blank=True)
+    branche = models.ForeignKey(Branche, on_delete=models.CASCADE, related_name='classes',
+    null=True, blank=True )
 
     def __str__(self):
         return f"{self.nom} - {self.niveau}"
@@ -88,9 +89,9 @@ class Agent(models.Model):
 class Etudiant(models.Model):
     student_name = models.CharField(max_length=100)
     part_count = models.PositiveIntegerField(default=1)
-    gender = models.CharField(max_length=1, choices=[('M', 'Homme'), ('F', 'Femme')])
-    birth_date = models.DateField()
-    birth_place = models.CharField(max_length=100)
+    gender = models.CharField(max_length=1, choices=[('M', 'ذكر'), ('F', 'أنثى')])
+    birth_date = models.DateField(null=True, blank=True)
+    birth_place = models.CharField(max_length=100, null=True, blank=True)
     date_inscription = models.DateField(auto_now_add=True)
     student_photo = models.ImageField(upload_to='etudiants_photos/', null=True, blank=True)
 
@@ -177,3 +178,40 @@ class Paiement(models.Model):
 
     def __str__(self):
         return f"{self.etudiant.student_name} - {self.montant_paye} MRU - {self.mois}"
+
+class Activity(models.Model):
+
+    STATUS_CHOICES = [
+        ('active', 'نشط'),
+        ('inactive', 'غير نشط'),
+        ('completed', 'منتهية'),
+    ]
+
+    name = models.CharField(max_length=100)
+    start_date = models.DateField()
+    end_date = models.DateField()
+    price = models.DecimalField(max_digits=8, decimal_places=2)
+    session = models.CharField(max_length=20)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='active')
+
+    def __str__(self):
+        return f"{self.name} ({self.session})"
+
+class AcademicYear(models.Model):
+    year        = models.CharField(max_length=9, unique=True, help_text="ex: 2024-2025")
+    start_date  = models.DateField()
+    end_date    = models.DateField()
+
+    class Meta:
+        ordering            = ("-start_date",)
+        verbose_name        = "Academic year"
+        verbose_name_plural = "Academic years"
+
+    def __str__(self) -> str:
+        return self.year
+
+    def clean(self):
+        """extra integrity: end_date must be after start_date"""
+        from django.core.exceptions import ValidationError
+        if self.end_date <= self.start_date:
+            raise ValidationError("End date must be after start date.")

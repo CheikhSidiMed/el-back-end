@@ -2,7 +2,7 @@ from django.shortcuts import render
 from rest_framework import viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
-from .models import Branche, Classe, Niveau, Agent, Etudiant, Mois, Paiement, Utilisateur
+from .models import Branche, Classe, Niveau, Agent, Etudiant, Mois, Paiement, Utilisateur, Activity, AcademicYear
 from .serializers import *
 from rest_framework_simplejwt.views import TokenObtainPairView
 
@@ -27,6 +27,21 @@ class EtudiantViewSet(viewsets.ModelViewSet):
     queryset = Etudiant.objects.all()
     serializer_class = EtudiantSerializer
 
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        if not serializer.is_valid():
+            print("Validation Error:", serializer.errors)
+            return Response(serializer.errors, status=400)
+        self.perform_create(serializer)
+        return Response(serializer.data, status=201)
+
+    def get_queryset(self):
+        queryset = Etudiant.objects.all()
+        classe = self.request.query_params.get('classe')
+        if classe:
+            queryset = queryset.filter(classe_id=classe)
+        return queryset
+
 class MoisViewSet(viewsets.ModelViewSet):
     queryset = Mois.objects.all()
     serializer_class = MoisSerializer
@@ -34,6 +49,10 @@ class MoisViewSet(viewsets.ModelViewSet):
 class PaiementViewSet(viewsets.ModelViewSet):
     queryset = Paiement.objects.all()
     serializer_class = PaiementSerializer
+
+class ActivityViewSet(viewsets.ModelViewSet):
+    queryset = Activity.objects.all()
+    serializer_class = ActivitySerializer
 
 class UtilisateurViewSet(viewsets.ModelViewSet):
     queryset = Utilisateur.objects.all()
@@ -53,3 +72,9 @@ class UtilisateurViewSet(viewsets.ModelViewSet):
 class MyTokenObtainPairView(TokenObtainPairView):
     serializer_class = MyTokenObtainPairSerializer
 
+
+class AcademicYearViewSet(viewsets.ModelViewSet):
+    """Full CRUD for AcademicYear (list, retrieve, create, update, delete)."""
+    queryset         = AcademicYear.objects.all()
+    serializer_class = AcademicYearSerializer
+    lookup_field     = "id"

@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Branche, Classe, Niveau, Agent, Etudiant, Mois, Paiement, Utilisateur
+from .models import Branche, Classe, Niveau, Agent, Etudiant, Mois, Paiement, Utilisateur, Activity, AcademicYear
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
 
@@ -9,9 +9,20 @@ class BrancheSerializer(serializers.ModelSerializer):
         fields = '__all__'
 
 class ClasseSerializer(serializers.ModelSerializer):
+    # → visible UNIQUEMENT dans la réponse (GET)
+    branche = BrancheSerializer(read_only=True)
+
+    # → utilisé UNIQUEMENT à la création / mise à jour (POST / PATCH)
+    branche_id = serializers.PrimaryKeyRelatedField(
+        source='branche',                 # fait le lien avec le FK `branche`
+        queryset=Branche.objects.all(),
+        write_only=True
+    )
+
     class Meta:
         model = Classe
-        fields = '__all__'
+        fields = ['id', 'nom', 'niveau', 'branche', 'branche_id']
+
 
 class NiveauSerializer(serializers.ModelSerializer):
     class Meta:
@@ -23,13 +34,17 @@ class AgentSerializer(serializers.ModelSerializer):
         model = Agent
         fields = '__all__'
 
+class ActivitySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Activity
+        fields = '__all__'
+
 class EtudiantSerializer(serializers.ModelSerializer):
     level = NiveauSerializer(read_only=True)
     classe = ClasseSerializer(read_only=True)
     branche = BrancheSerializer(read_only=True)
     agent = AgentSerializer(read_only=True)
 
-    # pour créer ou mettre à jour, inclure aussi les IDs
     level_id = serializers.PrimaryKeyRelatedField(
         queryset=Niveau.objects.all(), source='level', write_only=True, required=False
     )
@@ -42,9 +57,11 @@ class EtudiantSerializer(serializers.ModelSerializer):
     agent_id = serializers.PrimaryKeyRelatedField(
         queryset=Agent.objects.all(), source='agent', write_only=True, required=False, allow_null=True
     )
+
     class Meta:
         model = Etudiant
         fields = '__all__'
+
 
 class MoisSerializer(serializers.ModelSerializer):
     class Meta:
@@ -98,3 +115,8 @@ class MyTokenObtainPairSerializer(TokenObtainPairSerializer):
         # Now inject the serialized user data into the response:
         data['user'] = UtilisateurSerializer(self.user).data
         return data
+
+class AcademicYearSerializer(serializers.ModelSerializer):
+    class Meta:
+        model  = AcademicYear
+        fields = ("id", "year", "start_date", "end_date")

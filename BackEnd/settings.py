@@ -133,6 +133,7 @@ STATIC_URL = 'static/'
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 AUTH_USER_MODEL = 'school_app.Utilisateur'
+APPEND_SLASH = False
 
 
 CORS_ORIGIN_ALLOW_ALL = True
