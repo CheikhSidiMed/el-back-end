@@ -215,3 +215,24 @@ class AcademicYear(models.Model):
         from django.core.exceptions import ValidationError
         if self.end_date <= self.start_date:
             raise ValidationError("End date must be after start date.")
+
+class MonthlyReport(models.Model):
+    student = models.ForeignKey(Etudiant, on_delete=models.CASCADE)
+    year = models.CharField(max_length=20)
+    month = models.CharField(max_length=20)  # or use IntegerField for 1–12 if preferred
+
+    ahzab = models.CharField(max_length=100, blank=True, null=True)
+    memorization_amount = models.CharField(max_length=100, blank=True, null=True)
+    previous_level = models.CharField(max_length=100, blank=True, null=True)
+    current_level = models.CharField(max_length=100, blank=True, null=True)
+    progress = models.CharField(max_length=100, blank=True, null=True)
+    absence = models.CharField(max_length=100, blank=True, null=True)
+    remarks = models.TextField(blank=True, null=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ['student', 'month', 'year']  # to avoid duplicates
+
+    def __str__(self):
+        return f"{self.student.full_name} - {self.month} {self.year}"

@@ -12,6 +12,7 @@ router.register(r'activitys', ActivityViewSet)
 router.register(r'mois', MoisViewSet)
 router.register(r'paiements', PaiementViewSet)
 router.register(r'academic-years', AcademicYearViewSet)
+router.register(r'monthly-report', MonthlyReportViewSet)
 
 
 

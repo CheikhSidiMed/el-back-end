@@ -2,7 +2,7 @@ from django.shortcuts import render
 from rest_framework import viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
-from .models import Branche, Classe, Niveau, Agent, Etudiant, Mois, Paiement, Utilisateur, Activity, AcademicYear
+from .models import Branche, Classe, Niveau, Agent, Etudiant, Mois, Paiement, Utilisateur, Activity, AcademicYear, MonthlyReport
 from .serializers import *
 from rest_framework_simplejwt.views import TokenObtainPairView
 
@@ -53,6 +53,25 @@ class PaiementViewSet(viewsets.ModelViewSet):
 class ActivityViewSet(viewsets.ModelViewSet):
     queryset = Activity.objects.all()
     serializer_class = ActivitySerializer
+
+
+class MonthlyReportViewSet(viewsets.ModelViewSet):
+    queryset = MonthlyReport.objects.all()
+    serializer_class = MonthlyReportSerializer
+    
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        student_id = self.request.query_params.get('student_id')
+        month = self.request.query_params.get('month')
+        year = self.request.query_params.get('year')
+
+        if student_id and month and year:
+            queryset = queryset.filter(
+                student_id=student_id,
+                month=month,
+                year=year
+            )
+        return queryset
 
 class UtilisateurViewSet(viewsets.ModelViewSet):
     queryset = Utilisateur.objects.all()

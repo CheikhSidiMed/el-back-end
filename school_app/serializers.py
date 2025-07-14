@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Branche, Classe, Niveau, Agent, Etudiant, Mois, Paiement, Utilisateur, Activity, AcademicYear
+from .models import Branche, Classe, Niveau, Agent, Etudiant, Mois, Paiement, Utilisateur, Activity, AcademicYear, MonthlyReport
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
 
@@ -71,6 +71,12 @@ class MoisSerializer(serializers.ModelSerializer):
 class PaiementSerializer(serializers.ModelSerializer):
     class Meta:
         model = Paiement
+        fields = '__all__'
+
+
+class MonthlyReportSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = MonthlyReport
         fields = '__all__'
 
 
