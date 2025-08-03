@@ -2,9 +2,10 @@ from django.shortcuts import render
 from rest_framework import viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
-from .models import Branche, Classe, Niveau, Agent, Etudiant, Mois, Paiement, Utilisateur, Activity, AcademicYear, MonthlyReport
+from .models import Branche, Classe, Niveau, Agent, Etudiant, Mois, Paiement, Utilisateur, Activity, AcademicYear, MonthlyReport, DailyAbsence
 from .serializers import *
 from rest_framework_simplejwt.views import TokenObtainPairView
+from rest_framework.decorators import api_view
 
 
 class BrancheViewSet(viewsets.ModelViewSet):
@@ -54,6 +55,10 @@ class ActivityViewSet(viewsets.ModelViewSet):
     queryset = Activity.objects.all()
     serializer_class = ActivitySerializer
 
+class DailyAbsenceViewSet(viewsets.ModelViewSet):
+    queryset = DailyAbsence.objects.all()
+    serializer_class = DailyAbsenceSerializer
+
 
 class MonthlyReportViewSet(viewsets.ModelViewSet):
     queryset = MonthlyReport.objects.all()
@@ -97,3 +102,25 @@ class AcademicYearViewSet(viewsets.ModelViewSet):
     queryset         = AcademicYear.objects.all()
     serializer_class = AcademicYearSerializer
     lookup_field     = "id"
+
+
+@api_view(['GET'])
+def daily_absence_list(request):
+    queryset = DailyAbsence.objects.all()
+    month = request.query_params.get('month')  # ex: '07'
+    year = request.query_params.get('year')    # ex: '2024-2025'
+
+    if month and year:
+        try:
+            month_int = int(month.lstrip('0'))  # '07' => 7
+            queryset = queryset.filter(
+                date__month=month_int,
+                currentYear__iexact=year.strip()  # ignore espaces
+            )
+        except ValueError:
+            return Response({"error": "Invalid month format"}, status=400)
+
+    serializer = DailyAbsenceSerializer(queryset, many=True)
+    return Response(serializer.data)
+
+

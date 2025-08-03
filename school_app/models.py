@@ -222,6 +222,7 @@ class MonthlyReport(models.Model):
     month = models.CharField(max_length=20)  # or use IntegerField for 1–12 if preferred
 
     ahzab = models.CharField(max_length=100, blank=True, null=True)
+    thmn = models.CharField(max_length=100, blank=True, null=True)
     memorization_amount = models.CharField(max_length=100, blank=True, null=True)
     previous_level = models.CharField(max_length=100, blank=True, null=True)
     current_level = models.CharField(max_length=100, blank=True, null=True)
@@ -236,3 +237,23 @@ class MonthlyReport(models.Model):
 
     def __str__(self):
         return f"{self.student.full_name} - {self.month} {self.year}"
+
+class DailyAbsence(models.Model):
+    SESSION_CHOICES = [
+        ('صباحًا', 'صباحًا'),
+        ('مساءً', 'مساءً'),
+    ]
+
+    student = models.ForeignKey(Etudiant, on_delete=models.CASCADE)
+    date = models.DateField()  # full date (e.g., 2025-07-16)
+    currentYear = models.TextField(blank=True, null=True, default="2024-2025")
+    session = models.CharField(max_length=6, choices=SESSION_CHOICES)  # AM or PM
+
+    justified_absence = models.BooleanField(default=False)
+    remark = models.TextField(blank=True, null=True)
+
+    class Meta:
+        unique_together = ['student', 'date', 'session']  # no duplicate absence per session
+
+    def __str__(self):
+        return f"{self.student.full_name} - {self.date} ({self.get_session_display()})"
