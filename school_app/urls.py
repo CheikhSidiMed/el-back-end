@@ -11,6 +11,9 @@ router.register(r'etudiants', EtudiantViewSet)
 router.register(r'activitys', ActivityViewSet)
 router.register(r'mois', MoisViewSet)
 router.register(r'paiements', PaiementViewSet)
+router.register(r'bank-accounts', BankAccountViewSet)
+router.register(r'receipts', ReceiptViewSet)
+router.register(r'receipts-payment', ReceiptPaymentViewSet)
 router.register(r'academic-years', AcademicYearViewSet)
 router.register(r'monthly-report', MonthlyReportViewSet)
 router.register(r'daily-absence', DailyAbsenceViewSet)
@@ -23,6 +26,7 @@ router.register(r'utilisateurs', UtilisateurViewSet)
 urlpatterns = [
     path('api/', include(router.urls)),
     path('api/daily-absence/par-month', daily_absence_list, name='daily-absence-by-month'),
+    path('api/student/payments/', student_payments, name='student-payments'),
     path('api/token/', MyTokenObtainPairView.as_view(), name='token_obtain_pair'),
 
 ]

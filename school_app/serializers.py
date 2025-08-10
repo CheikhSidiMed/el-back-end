@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Branche, Classe, Niveau, Agent, Etudiant, Mois, Paiement, Utilisateur, Activity, AcademicYear, MonthlyReport, DailyAbsence
+from .models import Branche, Classe, Niveau, Agent, Etudiant, Mois, Paiement, BankAccount, Receipt, ReceiptPayment, Utilisateur, Activity, AcademicYear, MonthlyReport, DailyAbsence
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
 
@@ -74,6 +74,18 @@ class PaiementSerializer(serializers.ModelSerializer):
         fields = '__all__'
 
 
+class ReceiptSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Receipt
+        fields = '__all__'
+
+
+class ReceiptPaymentSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ReceiptPayment
+        fields = '__all__'
+
+
 class MonthlyReportSerializer(serializers.ModelSerializer):
     class Meta:
         model = MonthlyReport
@@ -82,6 +94,12 @@ class MonthlyReportSerializer(serializers.ModelSerializer):
 class DailyAbsenceSerializer(serializers.ModelSerializer):
     class Meta:
         model = DailyAbsence
+        fields = '__all__'
+
+
+class BankAccountSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = BankAccount
         fields = '__all__'
 
 

@@ -1,6 +1,7 @@
 from django.contrib.auth.models import AbstractUser
 from django.db import models
 from django.contrib.auth.base_user import BaseUserManager
+from django.conf import settings
 
 class UtilisateurManager(BaseUserManager):
     def create_user(self, phone, password=None, **extra_fields):
@@ -168,17 +169,6 @@ class Frais(models.Model):
     def __str__(self):
         return f"{self.classe.nom} - {self.montant} MRU"
 
-class Paiement(models.Model):
-    date_paiement = models.DateField(auto_now_add=True)
-    montant_paye = models.DecimalField(max_digits=8, decimal_places=2)
-    etudiant = models.ForeignKey(Etudiant, on_delete=models.CASCADE)
-    mois = models.ForeignKey(Mois, on_delete=models.CASCADE)
-    methode_paiement = models.CharField(max_length=50)
-    reference_transaction = models.CharField(max_length=100)
-
-    def __str__(self):
-        return f"{self.etudiant.student_name} - {self.montant_paye} MRU - {self.mois}"
-
 class Activity(models.Model):
 
     STATUS_CHOICES = [
@@ -253,7 +243,52 @@ class DailyAbsence(models.Model):
     remark = models.TextField(blank=True, null=True)
 
     class Meta:
-        unique_together = ['student', 'date', 'session']  # no duplicate absence per session
+        unique_together = ['student', 'date', 'session']
 
     def __str__(self):
         return f"{self.student.full_name} - {self.date} ({self.get_session_display()})"
+
+class BankAccount(models.Model):
+    bank_name = models.CharField(max_length=100)
+    account_number = models.CharField(max_length=100)
+
+    def __str__(self):
+        return f"{self.bank_name} - {self.account_number}"
+
+
+class Paiement(models.Model):
+    PAYMENT_METHOD_CHOICES = [
+        ('espèce', 'Espèce'),
+        ('virement', 'Virement')
+    ]
+
+    etudiant = models.ForeignKey(Etudiant, on_delete=models.CASCADE)
+    academic_year = models.ForeignKey(AcademicYear, on_delete=models.CASCADE)
+    month = models.IntegerField()  # 1 = Janvier, ..., 12 = Décembre
+    due_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    paid_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    remaining_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    payment_date = models.DateField(auto_now_add=True)
+    payment_method = models.CharField(max_length=20, choices=PAYMENT_METHOD_CHOICES, default="espèce")
+    bank = models.ForeignKey(BankAccount, on_delete=models.SET_NULL, null=True, blank=True)
+    agent = models.ForeignKey(Agent, on_delete=models.SET_NULL, null=True, blank=True)
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True)
+
+    def __str__(self):
+        return f"{self.etudiant.student_name} - Mois: {self.month} - {self.academic_year.year}"
+
+
+class Receipt(models.Model):
+    receipt_number = models.CharField(max_length=20)
+    etudiant = models.ForeignKey(Etudiant, on_delete=models.CASCADE)
+    created_at = models.DateTimeField(auto_now_add=True)
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True)
+
+    def __str__(self):
+        return self.receipt_number
+
+
+class ReceiptPayment(models.Model):
+    receipt = models.ForeignKey(Receipt, on_delete=models.CASCADE)
+    payment = models.ForeignKey(Paiement, on_delete=models.CASCADE)
+
