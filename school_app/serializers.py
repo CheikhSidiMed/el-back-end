@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Branche, Classe, Niveau, Agent, Etudiant, Mois, Paiement, BankAccount, Receipt, ReceiptPayment, Utilisateur, Activity, AcademicYear, MonthlyReport, DailyAbsence
+from .models import Branche, Classe, Niveau, Agent, Etudiant, Mois, Paiement, Employee, Job, BankAccount, Receipt, ReceiptPayment, Utilisateur, Activity, AcademicYear, MonthlyReport, DailyAbsence, AccountCategory, Account, Transaction
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
 
@@ -103,11 +103,66 @@ class BankAccountSerializer(serializers.ModelSerializer):
         fields = '__all__'
 
 
+class JobSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Job
+        fields = '__all__'
+
+
+class TransactionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Transaction
+        fields = '__all__'
+
+
+class AccountCategorySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = AccountCategory
+        fields = '__all__'
+
+
+class EmployeeSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Employee
+        fields = '__all__'
+
+    def create(self, validated_data):
+        # 1️⃣ Créer l'employé
+        employee = super().create(validated_data)
+
+        # 2️⃣ Créer automatiquement un utilisateur
+        Utilisateur.objects.create(
+            phone=employee.phone,
+            role=employee.job,  # associer au job comme role
+            first_name=employee.full_name,  # pour cohérence
+            password=employee.phone  # mot de passe par défaut
+        )
+
+        return employee
+
+
+class AccountSerializer(serializers.ModelSerializer):
+    category = AccountCategorySerializer(read_only=True)
+    category_id = serializers.PrimaryKeyRelatedField(
+        queryset=AccountCategory.objects.all(),
+        source="category",
+        write_only=True
+    )
+    class Meta:
+        model = Account
+        fields = '__all__'
+
 
 class UtilisateurSerializer(serializers.ModelSerializer):
+    role = JobSerializer(read_only=True)
+    role_id = serializers.PrimaryKeyRelatedField(
+        queryset=Job.objects.all(),
+        source="role",
+        write_only=True
+    )
     class Meta:
         model = Utilisateur
-        fields = ['id', 'phone', 'role', 'first_name', 'password', 'created_at']
+        fields = ['id', 'phone', 'role', 'role_id', 'first_name', 'password', 'created_at']
         extra_kwargs = {
             'password': {'write_only': True, 'required': False},
             'created_at': {'read_only': True}
