@@ -2,6 +2,27 @@ from django.contrib.auth.models import AbstractUser
 from django.db import models
 from django.contrib.auth.base_user import BaseUserManager
 from django.conf import settings
+from decimal import Decimal
+from django.conf import settings
+from django.utils import timezone
+
+
+class Job(models.Model):
+    ROLES = (
+        ('admin_g', 'المدير العام'),
+        ('admin', 'مدير التسجيل والحسابات'),
+        ('dg_lessen', 'مدير الدروس'),
+        ('admin_m', 'إدارة المقرأة'),
+        ('teacher', 'أستاذ(ة)'),
+        ('user', 'المراقب'),
+    )
+    title = models.CharField(max_length=150, choices=ROLES, unique=True, default='user')
+    description = models.TextField(blank=True, null=True)
+    # role = models.CharField(max_length=30, choices=ROLES, default='user')
+
+    def __str__(self):
+        return self.title
+
 
 class UtilisateurManager(BaseUserManager):
     def create_user(self, phone, password=None, **extra_fields):
@@ -22,16 +43,14 @@ class UtilisateurManager(BaseUserManager):
 
 
 class Utilisateur(AbstractUser):
-    ROLES = (
-        ('admin_g', 'المدير العام'),
-        ('admin', 'مدير التسجيل والحسابات'),
-        ('dg_lessen', 'مدير الدروس'),
-        ('admin_m', 'إدارة المقرأة'),
-        ('teacher', 'أستاذ(ة)'),
-        ('user', 'المراقب'),
-    )
 
-    role = models.CharField(max_length=20, choices=ROLES, default='user')
+    # role = models.CharField(max_length=20, choices=ROLES, default='user')
+    role = models.ForeignKey(
+        'Job',
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name='utilisateur'
+    )
 
     username = None
     last_name = None
@@ -48,6 +67,7 @@ class Utilisateur(AbstractUser):
 
     def __str__(self):
         return self.phone or "Utilisateur sans numéro"
+        
 
 class Branche(models.Model):
     nom = models.CharField(max_length=100)
@@ -248,9 +268,43 @@ class DailyAbsence(models.Model):
     def __str__(self):
         return f"{self.student.full_name} - {self.date} ({self.get_session_display()})"
 
+
+class Employee(models.Model):
+    number = models.CharField(max_length=50, unique=True)  # matricule ou code employé
+    full_name = models.CharField(max_length=200)
+    balance = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
+    phone = models.CharField(max_length=30, blank=True, null=True)
+    classe = models.ForeignKey(
+        'Classe',
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name='employees'
+    )
+    branche = models.ForeignKey(
+        'Branche',
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name='employees'
+    )
+    job = models.ForeignKey(
+        'Job',
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name='employees'
+    )
+    salary = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
+    subscription_date = models.DateField()
+    is_actif = models.BooleanField(default=True) 
+    id_number = models.CharField(max_length=100, blank=True, null=True)
+
+    def __str__(self):
+        return f"{self.full_name} ({self.employee_number})"
+
+
 class BankAccount(models.Model):
     bank_name = models.CharField(max_length=100)
     account_number = models.CharField(max_length=100)
+    balance = models.DecimalField(max_digits=13, decimal_places=2, default=0)
 
     def __str__(self):
         return f"{self.bank_name} - {self.account_number}"
@@ -264,7 +318,7 @@ class Paiement(models.Model):
 
     etudiant = models.ForeignKey(Etudiant, on_delete=models.CASCADE)
     academic_year = models.ForeignKey(AcademicYear, on_delete=models.CASCADE)
-    month = models.IntegerField()  # 1 = Janvier, ..., 12 = Décembre
+    month = models.IntegerField()
     due_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     paid_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     remaining_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
@@ -278,17 +332,156 @@ class Paiement(models.Model):
         return f"{self.etudiant.student_name} - Mois: {self.month} - {self.academic_year.year}"
 
 
-class Receipt(models.Model):
-    receipt_number = models.CharField(max_length=20)
-    etudiant = models.ForeignKey(Etudiant, on_delete=models.CASCADE)
-    created_at = models.DateTimeField(auto_now_add=True)
-    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True)
+
+class AccountCategory(models.Model):
+    """
+    Catégorie de compte (ex: Banque, Caisse, Mobile Money, etc.)
+    """
+    name = models.CharField(max_length=100, unique=True)
+    description = models.TextField(blank=True, null=True)
 
     def __str__(self):
-        return self.receipt_number
+        return self.name
+
+
+class Account(models.Model):
+    """
+    Compte bancaire / caisse / mobile money, etc.
+    """
+    category = models.ForeignKey(AccountCategory, on_delete=models.CASCADE, related_name="accounts")
+    name = models.CharField(max_length=150)
+    number = models.CharField(max_length=50, blank=True, null=True)  # Numéro de compte / IBAN
+    balance = models.DecimalField(max_digits=15, decimal_places=2, default=0.00)
+    currency = models.CharField(max_length=10, default="MRO")  # Exemple: MRO, EUR, USD
+    date_opened = models.DateField(auto_now_add=True)
+    is_active = models.BooleanField(default=True)
+
+    def __str__(self):
+        return f"{self.name} ({self.category})"
+
+
+
+class Transaction(models.Model):
+    TRANSACTION_TYPE_CHOICES = [
+        ('plus', 'Plus'),
+        ('minus', 'Minus'),
+    ]
+
+    student = models.ForeignKey(
+        'Etudiant',
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name='transactions'
+    )
+    agent = models.ForeignKey(
+        'Agent',
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name='transactions'
+    )
+    month = models.IntegerField(blank=True, null=True) 
+    due_amount = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal("0.00"))
+    paid_amount = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal("0.00"))
+    remaining_amount = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal("0.00"))
+    # date = models.DateField()
+    date = models.DateTimeField(default=timezone.now)
+
+    payment_method = models.CharField(max_length=50, blank=True, null=True)
+    description = models.TextField(blank=True, null=True)
+    type = models.CharField(max_length=20, choices=TRANSACTION_TYPE_CHOICES, default='plus')
+
+
+    bank = models.ForeignKey(
+        'BankAccount',
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name='transactions'
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name='transactions'
+    )
+    account = models.ForeignKey(
+        'Account',
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name='transactions'
+    )
+    employee = models.ForeignKey(
+        'Employee',
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name='transactions'
+    )
+
+    def __str__(self):
+        return f"Transaction {self.id} - {self.paid_amount}"
+
+
+class Receipt(models.Model):
+    receipt_id = models.AutoField(primary_key=True)
+    student = models.ForeignKey(
+        'Etudiant',
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name='receipts'
+    )
+    agent = models.ForeignKey(
+        'Agent',
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name='receipts'
+    )
+    account = models.ForeignKey(
+        'Account',
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name='receipts'
+    )
+    employee = models.ForeignKey(
+        'Employee',
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name='receipts'
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name='receipts'
+    )
+    total_amount = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
+    receipt_date = models.DateField(default=timezone.now)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name='created_receipts'
+    )
+    receipt_description = models.TextField(blank=True, null=True)
+
+    def __str__(self):
+        return f"Receipt {self.receipt_id} - {self.total_amount}"
 
 
 class ReceiptPayment(models.Model):
-    receipt = models.ForeignKey(Receipt, on_delete=models.CASCADE)
-    payment = models.ForeignKey(Paiement, on_delete=models.CASCADE)
+    receipt = models.ForeignKey(
+        Receipt,
+        on_delete=models.CASCADE,
+        related_name='receipt_payments'
+    )
+    transaction = models.ForeignKey(
+        'Transaction',
+        on_delete=models.CASCADE,
+        related_name='receipt_payments'
+    )
+
+    class Meta:
+        unique_together = ('receipt', 'transaction')
+
+    def __str__(self):
+        return f"ReceiptPayment: Receipt {self.receipt_id} - Transaction {self.transaction.id}"
+
 

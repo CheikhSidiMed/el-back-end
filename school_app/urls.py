@@ -1,26 +1,34 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from .views import *
+from rest_framework_simplejwt.views import TokenRefreshView
 
 router = DefaultRouter()
-router.register(r'branches', BrancheViewSet)
-router.register(r'classes', ClasseViewSet)
-router.register(r'levels', NiveauViewSet)
-router.register(r'agents', AgentViewSet)
-router.register(r'etudiants', EtudiantViewSet)
-router.register(r'activitys', ActivityViewSet)
-router.register(r'mois', MoisViewSet)
-router.register(r'paiements', PaiementViewSet)
-router.register(r'bank-accounts', BankAccountViewSet)
-router.register(r'receipts', ReceiptViewSet)
-router.register(r'receipts-payment', ReceiptPaymentViewSet)
-router.register(r'academic-years', AcademicYearViewSet)
-router.register(r'monthly-report', MonthlyReportViewSet)
-router.register(r'daily-absence', DailyAbsenceViewSet)
 
+router.register(r'branches', BrancheViewSet, basename="branche")
+router.register(r'classes', ClasseViewSet, basename="classe")
+router.register(r'levels', NiveauViewSet, basename="niveau")
+router.register(r'agents', AgentViewSet, basename="agent")
+router.register(r'etudiants', EtudiantViewSet, basename="etudiant")
+router.register(r'activitys', ActivityViewSet, basename="activity")
+router.register(r'mois', MoisViewSet, basename="mois")
+router.register(r'paiements', PaiementViewSet, basename="paiement")
 
+router.register(r'bank-accounts', BankAccountViewSet, basename="bank-account")
+router.register(r'receipts', ReceiptViewSet, basename="receipt")
+router.register(r'receipts-payment', ReceiptPaymentViewSet, basename="receipt-payment")
+router.register(r'academic-years', AcademicYearViewSet, basename="academic-year")
+router.register(r'monthly-report', MonthlyReportViewSet, basename="monthly-report")
+router.register(r'daily-absence', DailyAbsenceViewSet, basename="daily-absence")
 
-router.register(r'utilisateurs', UtilisateurViewSet)
+router.register(r'accounts', AccountViewSet, basename="account")
+router.register(r'account-categorys', AccountCategoryViewSet, basename="account-category")
+
+router.register(r'transactions', TransactionViewSet, basename="transaction")
+router.register(r'employees', EmployeeViewSet, basename="employee")
+router.register(r'jobs', JobViewSet, basename="job")
+
+router.register(r'utilisateurs', UtilisateurViewSet, basename="utilisateur")
 
 
 urlpatterns = [
@@ -28,5 +36,7 @@ urlpatterns = [
     path('api/daily-absence/par-month', daily_absence_list, name='daily-absence-by-month'),
     path('api/student/payments/', student_payments, name='student-payments'),
     path('api/token/', MyTokenObtainPairView.as_view(), name='token_obtain_pair'),
+    path("api/token/refresh/", TokenRefreshView.as_view(), name="token_refresh"),
+    path('api-auth/', include('rest_framework.urls')),
 
 ]
