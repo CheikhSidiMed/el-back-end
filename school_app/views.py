@@ -11,6 +11,7 @@ from rest_framework.permissions import IsAuthenticated
 
 from rest_framework import viewsets
 from django_filters.rest_framework import DjangoFilterBackend
+from rest_framework import generics
 
 from django.utils import timezone
 from datetime import date, datetime
@@ -335,6 +336,11 @@ class AcademicYearViewSet(viewsets.ModelViewSet):
     serializer_class = AcademicYearSerializer
     lookup_field     = "id"
 
+from rest_framework.permissions import AllowAny
+
+class RegisterUserView(generics.CreateAPIView):
+    serializer_class = UtilisateurRegisterSerializer
+    permission_classes = [AllowAny]
 
 @api_view(['GET'])
 def daily_absence_list(request):
