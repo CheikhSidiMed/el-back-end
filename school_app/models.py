@@ -23,7 +23,6 @@ class Job(models.Model):
     def __str__(self):
         return self.title
 
-
 class UtilisateurManager(BaseUserManager):
     def create_user(self, phone, password=None, **extra_fields):
         if not phone:
@@ -41,10 +40,8 @@ class UtilisateurManager(BaseUserManager):
         extra_fields.setdefault('is_superuser', True)
         return self.create_user(phone, password, **extra_fields)
 
-
 class Utilisateur(AbstractUser):
 
-    # role = models.CharField(max_length=20, choices=ROLES, default='user')
     role = models.ForeignKey(
         'Job',
         on_delete=models.SET_NULL,
@@ -110,6 +107,7 @@ class Agent(models.Model):
 class Etudiant(models.Model):
     student_name = models.CharField(max_length=100)
     part_count = models.PositiveIntegerField(default=1)
+    is_inscrire = models.PositiveIntegerField(default=1)  # 1 = inscrit, 0 = not inscrit
     gender = models.CharField(max_length=1, choices=[('M', 'ذكر'), ('F', 'أنثى')])
     birth_date = models.DateField(null=True, blank=True)
     birth_place = models.CharField(max_length=100, null=True, blank=True)
@@ -126,8 +124,8 @@ class Etudiant(models.Model):
     discount = models.DecimalField(max_digits=8, decimal_places=2, default=0)
     remaining = models.DecimalField(max_digits=8, decimal_places=2, default=0)
 
-    classe = models.ForeignKey('Classe', on_delete=models.CASCADE)
-    branche = models.ForeignKey('Branche', on_delete=models.CASCADE)
+    classe = models.ForeignKey('Classe', null=True, blank=True, on_delete=models.CASCADE)
+    branche = models.ForeignKey('Branche', null=True, blank=True, on_delete=models.CASCADE)
     agent = models.ForeignKey('Agent', null=True, blank=True, on_delete=models.SET_NULL)
 
     phone = models.CharField(max_length=20, null=True, blank=True)
@@ -268,7 +266,6 @@ class DailyAbsence(models.Model):
     def __str__(self):
         return f"{self.student.full_name} - {self.date} ({self.get_session_display()})"
 
-
 class Employee(models.Model):
     number = models.CharField(max_length=50, unique=True)  # matricule ou code employé
     full_name = models.CharField(max_length=200)
@@ -298,8 +295,7 @@ class Employee(models.Model):
     id_number = models.CharField(max_length=100, blank=True, null=True)
 
     def __str__(self):
-        return f"{self.full_name} ({self.employee_number})"
-
+        return f"{self.full_name} ({self.number})"
 
 class BankAccount(models.Model):
     bank_name = models.CharField(max_length=100)
@@ -308,7 +304,6 @@ class BankAccount(models.Model):
 
     def __str__(self):
         return f"{self.bank_name} - {self.account_number}"
-
 
 class Paiement(models.Model):
     PAYMENT_METHOD_CHOICES = [
@@ -331,8 +326,6 @@ class Paiement(models.Model):
     def __str__(self):
         return f"{self.etudiant.student_name} - Mois: {self.month} - {self.academic_year.year}"
 
-
-
 class AccountCategory(models.Model):
     """
     Catégorie de compte (ex: Banque, Caisse, Mobile Money, etc.)
@@ -342,7 +335,6 @@ class AccountCategory(models.Model):
 
     def __str__(self):
         return self.name
-
 
 class Account(models.Model):
     """
@@ -359,6 +351,19 @@ class Account(models.Model):
     def __str__(self):
         return f"{self.name} ({self.category})"
 
+class Inscription(models.Model):
+    """Join table with extra fields for a student's registration to an activity"""
+    student = models.ForeignKey(Etudiant, on_delete=models.CASCADE)
+    activity = models.ForeignKey(Activity, on_delete=models.CASCADE)
+    montant = models.DecimalField(max_digits=8, decimal_places=2)  # amount paid
+    montant_pay = models.DecimalField(max_digits=8, decimal_places=2, default=0)
+    date_inscription = models.DateField(default=timezone.now)
+
+    class Meta:
+        unique_together = ('student', 'activity')
+
+    def __str__(self):
+        return f"{self.student} → {self.activity} ({self.montant})"
 
 
 class Transaction(models.Model):
@@ -393,8 +398,7 @@ class Transaction(models.Model):
 
     bank = models.ForeignKey(
         'BankAccount',
-        on_delete=models.SET_NULL,
-        null=True, blank=True,
+        on_delete=models.PROTECT,
         related_name='transactions'
     )
     user = models.ForeignKey(
@@ -415,10 +419,15 @@ class Transaction(models.Model):
         null=True, blank=True,
         related_name='transactions'
     )
+    inscription = models.ForeignKey(
+        'Inscription',
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name='transactions'
+    )
 
     def __str__(self):
         return f"Transaction {self.id} - {self.paid_amount}"
-
 
 class Receipt(models.Model):
     receipt_id = models.AutoField(primary_key=True)
@@ -465,7 +474,6 @@ class Receipt(models.Model):
     def __str__(self):
         return f"Receipt {self.receipt_id} - {self.total_amount}"
 
-
 class ReceiptPayment(models.Model):
     receipt = models.ForeignKey(
         Receipt,
@@ -483,5 +491,4 @@ class ReceiptPayment(models.Model):
 
     def __str__(self):
         return f"ReceiptPayment: Receipt {self.receipt_id} - Transaction {self.transaction.id}"
-
 

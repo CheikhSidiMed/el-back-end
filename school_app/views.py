@@ -2,12 +2,13 @@ from django.shortcuts import render
 from rest_framework import viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
-from .models import Branche, Classe, Niveau, Agent, Receipt, ReceiptPayment, Job, Employee, Transaction, Etudiant, Mois, Paiement, BankAccount, Receipt, ReceiptPayment, Utilisateur, Activity, AcademicYear, MonthlyReport, DailyAbsence, AccountCategory, Account
+from .models import Branche, Classe, Niveau, Agent, Receipt, ReceiptPayment, Job, Inscription, Employee, Transaction, Etudiant, Mois, Paiement, BankAccount, Receipt, ReceiptPayment, Utilisateur, Activity, AcademicYear, MonthlyReport, DailyAbsence, AccountCategory, Account
 from .serializers import *
 from rest_framework_simplejwt.views import TokenObtainPairView
 from rest_framework.decorators import api_view
 from django.db import transaction
 from rest_framework.permissions import IsAuthenticated
+from django.db.models import Sum
 
 from rest_framework import viewsets
 from django_filters.rest_framework import DjangoFilterBackend
@@ -19,6 +20,11 @@ from datetime import date, datetime
 from calendar import monthrange
 from decimal import Decimal
 from rest_framework import status
+
+from django.db.models.signals import post_save
+from django.dispatch import receiver
+
+
 
 class BrancheViewSet(viewsets.ModelViewSet):
     queryset = Branche.objects.all()
@@ -42,6 +48,22 @@ class EtudiantViewSet(viewsets.ModelViewSet):
     filter_backends = [DjangoFilterBackend]
     filterset_fields = ['agent_id'] 
 
+    def get_queryset(self):
+        queryset = Etudiant.objects.all()
+        inscrire_param = self.request.query_params.get('inscrire', None)
+
+        if inscrire_param is None:
+            # Default: only enrolled
+            queryset = queryset.filter(is_inscrire=1)
+        elif inscrire_param == '0':
+            # Only not enrolled
+            queryset = queryset.filter(is_inscrire=0)
+        elif inscrire_param == '1':
+            # All students (ignore is_inscrire filter)
+            queryset = queryset
+
+        return queryset
+
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
         if not serializer.is_valid():
@@ -60,6 +82,13 @@ class MoisViewSet(viewsets.ModelViewSet):
 class AccountCategoryViewSet(viewsets.ModelViewSet):
     queryset = AccountCategory.objects.all()
     serializer_class = AccountCategorySerializer
+
+
+class InscriptionViewSet(viewsets.ModelViewSet):
+    queryset = Inscription.objects.all()
+    serializer_class = InscriptionSerializer
+    filter_backends = [DjangoFilterBackend]
+    filterset_fields = ['activity', 'student']
 
 
 class JobViewSet(viewsets.ModelViewSet):
@@ -81,10 +110,10 @@ class TransactionViewSet(viewsets.ModelViewSet):
 
         # إنشاء إيصال مرتبط بالعملية
         receipt = Receipt.objects.create(
-            student=None,
-            agent=None,
+            student=transaction.student,
+            agent=transaction.agent,
             account=transaction.account,
-            employee=None,
+            employee=transaction.employee,
             total_amount=transaction.paid_amount,
             receipt_date=timezone.now().date(),
             created_by=self.request.user,
@@ -111,6 +140,7 @@ class TransactionViewSet(viewsets.ModelViewSet):
             "created_by": transaction.user.first_name if transaction.user else None,
             "transaction": serializer.data
         }, status=status.HTTP_201_CREATED)
+
 
 
 class PaiementViewSet(viewsets.ModelViewSet):
@@ -464,12 +494,6 @@ def student_payments(request):
 
 
 
-from django.db.models.signals import post_save
-from django.dispatch import receiver
-
-# from .models import Transaction
-
-
 @receiver(post_save, sender=Transaction)
 def update_account_balance(sender, instance, created, **kwargs):
     if created and instance.bank:
@@ -490,3 +514,112 @@ def update_account_balance(sender, instance, created, **kwargs):
         elif instance.type == "minus":  # Débit
             instance.employee.balance -= instance.paid_amount
         instance.employee.save()
+    if created and instance.inscription:
+        if instance.type == "plus":  # Crédit
+            instance.inscription.montant_pay += instance.paid_amount
+        elif instance.type == "minus":  # Débit
+            instance.inscription.montant_pay -= instance.paid_amount
+        instance.inscription.save()
+
+
+
+@api_view(['GET'])
+def filter_transactions(request):
+    start_date = request.GET.get("start_date")
+    end_date = request.GET.get("end_date")
+    user_id = request.GET.get("user_id")
+
+    if not start_date or not end_date:
+        return Response({"error": "Both start_date and end_date are required"}, status=400)
+
+    # ---- Transactions dans l'intervalle ----
+    transactions = Transaction.objects.filter(
+        date__date__gte=start_date,
+        date__date__lte=end_date
+    ).order_by("date")
+
+    if user_id:
+        transactions = transactions.filter(user_id=user_id)
+
+    serializer = TransactionSerializer(transactions, many=True)
+
+    # ---- Totaux période ----
+    total_plus_bank = transactions.filter(type="plus").exclude(bank_id=1).aggregate(s=Sum("paid_amount"))["s"] or 0
+    total_minus_bank = transactions.filter(type="minus").exclude(bank_id=1).aggregate(s=Sum("paid_amount"))["s"] or 0
+
+    total_plus_fund = transactions.filter(type="plus", bank_id=1).aggregate(s=Sum("paid_amount"))["s"] or 0
+    total_minus_fund = transactions.filter(type="minus", bank_id=1).aggregate(s=Sum("paid_amount"))["s"] or 0
+
+    # ---- Solde avant start_date ----
+    before_tx = Transaction.objects.filter(date__date__lt=start_date)
+    if user_id:
+        before_tx = before_tx.filter(user_id=user_id)
+
+    before_plus_bank = before_tx.filter(type="plus").exclude(bank_id=1).aggregate(s=Sum("paid_amount"))["s"] or 0
+    before_minus_bank = before_tx.filter(type="minus").exclude(bank_id=1).aggregate(s=Sum("paid_amount"))["s"] or 0
+
+    before_plus_fund = before_tx.filter(type="plus", bank_id=1).aggregate(s=Sum("paid_amount"))["s"] or 0
+    before_minus_fund = before_tx.filter(type="minus", bank_id=1).aggregate(s=Sum("paid_amount"))["s"] or 0
+
+    return Response({
+        "transactions": serializer.data,
+        "totals": {
+            "fund": {
+                "plus": float(total_plus_fund),
+                "minus": float(total_minus_fund),
+                "balance": float(total_plus_fund - total_minus_fund),
+            },
+            "bank": {
+                "plus": float(total_plus_bank),
+                "minus": float(total_minus_bank),
+                "balance": float(total_plus_bank - total_minus_bank),
+            }
+        },
+        "before_balance": {
+            "fund": float(before_plus_fund - before_minus_fund),
+            "bank": float(before_plus_bank - before_minus_bank),
+            "total": float((before_plus_fund - before_minus_fund) + (before_plus_bank - before_minus_bank))
+        }
+    })
+
+
+
+@api_view(['GET'])
+def filter_transactions_account(request):
+    start_date = request.GET.get("start_date")
+    end_date = request.GET.get("end_date")
+    account_id = request.GET.get("account_id")
+    employee_id = request.GET.get("employee_id")
+    bank_id = request.GET.get("bank_id")
+
+    if not start_date or not end_date:
+        return Response({"error": "Both start_date and end_date are required"}, status=400)
+
+    # ---- Transactions dans l'intervalle ----
+    transactions = Transaction.objects.filter(
+        date__date__gte=start_date,
+        date__date__lte=end_date
+    ).order_by("date")
+
+    if account_id:
+        transactions = transactions.filter(account_id=account_id)
+
+    if employee_id:
+        transactions = transactions.filter(employee_id=employee_id)
+
+    if bank_id:
+        transactions = transactions.filter(bank_id=bank_id)
+
+    serializer = TransactionSerializer(transactions, many=True)
+
+    # ---- Totaux période ----
+    total_plus = transactions.filter(type="plus").aggregate(s=Sum("paid_amount"))["s"] or 0
+    total_minus = transactions.filter(type="minus").aggregate(s=Sum("paid_amount"))["s"] or 0
+
+    return Response({
+        "transactions": serializer.data,
+        "totals": {
+            "plus": total_plus,
+            "minus": total_minus
+        },
+    })

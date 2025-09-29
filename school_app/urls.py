@@ -29,11 +29,14 @@ router.register(r'employees', EmployeeViewSet, basename="employee")
 router.register(r'jobs', JobViewSet, basename="job")
 
 router.register(r'utilisateurs', UtilisateurViewSet, basename="utilisateur")
+router.register(r'inscriptions', InscriptionViewSet, basename="inscription")
 
 
 urlpatterns = [
     path('api/', include(router.urls)),
     path('api/daily-absence/par-month', daily_absence_list, name='daily-absence-by-month'),
+    path('api/daillys/filter/', filter_transactions, name='filter-dailly'),
+    path('api/preview/filter/', filter_transactions_account, name='filter-dailly'),
     path('api/student/payments/', student_payments, name='student-payments'),
     path('api/token/', MyTokenObtainPairView.as_view(), name='token_obtain_pair'),
     path("api/token/refresh/", TokenRefreshView.as_view(), name="token_refresh"),

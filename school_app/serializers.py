@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Branche, Classe, Niveau, Agent, Etudiant, Mois, Paiement, Employee, Job, BankAccount, Receipt, ReceiptPayment, Utilisateur, Activity, AcademicYear, MonthlyReport, DailyAbsence, AccountCategory, Account, Transaction
+from .models import Branche, Classe, Niveau, Agent, Etudiant, Mois, Paiement, Inscription, Employee, Job, BankAccount, Receipt, ReceiptPayment, Utilisateur, Activity, AcademicYear, MonthlyReport, DailyAbsence, AccountCategory, Account, Transaction
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
 
@@ -46,13 +46,13 @@ class EtudiantSerializer(serializers.ModelSerializer):
     agent = AgentSerializer(read_only=True)
 
     level_id = serializers.PrimaryKeyRelatedField(
-        queryset=Niveau.objects.all(), source='level', write_only=True, required=False
+        queryset=Niveau.objects.all(), source='level', write_only=True, required=False, allow_null=True
     )
     classe_id = serializers.PrimaryKeyRelatedField(
-        queryset=Classe.objects.all(), source='classe', write_only=True
+        queryset=Classe.objects.all(), source='classe', write_only=True, required=False, allow_null=True
     )
     branche_id = serializers.PrimaryKeyRelatedField(
-        queryset=Branche.objects.all(), source='branche', write_only=True
+        queryset=Branche.objects.all(), source='branche', write_only=True, required=False, allow_null=True
     )
     agent_id = serializers.PrimaryKeyRelatedField(
         queryset=Agent.objects.all(), source='agent', write_only=True, required=False, allow_null=True
@@ -61,7 +61,6 @@ class EtudiantSerializer(serializers.ModelSerializer):
     class Meta:
         model = Etudiant
         fields = '__all__'
-
 
 class MoisSerializer(serializers.ModelSerializer):
     class Meta:
@@ -73,18 +72,15 @@ class PaiementSerializer(serializers.ModelSerializer):
         model = Paiement
         fields = '__all__'
 
-
 class ReceiptSerializer(serializers.ModelSerializer):
     class Meta:
         model = Receipt
         fields = '__all__'
 
-
 class ReceiptPaymentSerializer(serializers.ModelSerializer):
     class Meta:
         model = ReceiptPayment
         fields = '__all__'
-
 
 class MonthlyReportSerializer(serializers.ModelSerializer):
     class Meta:
@@ -96,28 +92,49 @@ class DailyAbsenceSerializer(serializers.ModelSerializer):
         model = DailyAbsence
         fields = '__all__'
 
-
 class BankAccountSerializer(serializers.ModelSerializer):
     class Meta:
         model = BankAccount
         fields = '__all__'
-
 
 class JobSerializer(serializers.ModelSerializer):
     class Meta:
         model = Job
         fields = '__all__'
 
-
 class TransactionSerializer(serializers.ModelSerializer):
+    bank = BankAccountSerializer(read_only=True)
+
+    bank_id = serializers.PrimaryKeyRelatedField(
+        queryset=BankAccount.objects.all(), source='bank', write_only=True, required=True
+    )
+    receipt_id = serializers.SerializerMethodField()
+
     class Meta:
         model = Transaction
         fields = '__all__'
-
+        
+    def get_receipt_id(self, obj):
+        receipt_payment = obj.receipt_payments.first()
+        return receipt_payment.receipt.receipt_id if receipt_payment else None
 
 class AccountCategorySerializer(serializers.ModelSerializer):
     class Meta:
         model = AccountCategory
+        fields = '__all__'
+
+class InscriptionSerializer(serializers.ModelSerializer):
+    student = EtudiantSerializer(read_only=True)
+    activity = ActivitySerializer(read_only=True)
+
+    student_id = serializers.PrimaryKeyRelatedField(
+        queryset=Etudiant.objects.all(), source='student', write_only=True, required=False
+    )
+    activity_id = serializers.PrimaryKeyRelatedField(
+        queryset=Activity.objects.all(), source='activity', write_only=True, required=False
+    )
+    class Meta:
+        model = Inscription
         fields = '__all__'
 
 class UtilisateurRegisterSerializer(serializers.ModelSerializer):
@@ -153,7 +170,6 @@ class EmployeeSerializer(serializers.ModelSerializer):
 
         return employee
 
-
 class AccountSerializer(serializers.ModelSerializer):
     category = AccountCategorySerializer(read_only=True)
     category_id = serializers.PrimaryKeyRelatedField(
@@ -164,7 +180,6 @@ class AccountSerializer(serializers.ModelSerializer):
     class Meta:
         model = Account
         fields = '__all__'
-
 
 class UtilisateurSerializer(serializers.ModelSerializer):
     role = JobSerializer(read_only=True)
@@ -197,7 +212,6 @@ class UtilisateurSerializer(serializers.ModelSerializer):
             instance.set_password(password)
         instance.save()
         return instance
-
 
 class MyTokenObtainPairSerializer(TokenObtainPairSerializer):
     @classmethod
