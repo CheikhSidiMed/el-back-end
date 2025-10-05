@@ -31,6 +31,9 @@ router.register(r'jobs', JobViewSet, basename="job")
 router.register(r'utilisateurs', UtilisateurViewSet, basename="utilisateur")
 router.register(r'inscriptions', InscriptionViewSet, basename="inscription")
 
+router.register(r'garants', GarantViewSet, basename="garant")
+router.register(r'garant-paiements', GarantPaiementViewSet, basename="garant-paiement")
+
 
 urlpatterns = [
     path('api/', include(router.urls)),
@@ -38,6 +41,7 @@ urlpatterns = [
     path('api/daillys/filter/', filter_transactions, name='filter-dailly'),
     path('api/preview/filter/', filter_transactions_account, name='filter-dailly'),
     path('api/student/payments/', student_payments, name='student-payments'),
+    path('api/garant/payments/', garant_payments, name='garant-payments'),
     path('api/token/', MyTokenObtainPairView.as_view(), name='token_obtain_pair'),
     path("api/token/refresh/", TokenRefreshView.as_view(), name="token_refresh"),
     path('api-auth/', include('rest_framework.urls')),

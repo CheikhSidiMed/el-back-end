@@ -2,7 +2,7 @@ from django.shortcuts import render
 from rest_framework import viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
-from .models import Branche, Classe, Niveau, Agent, Receipt, ReceiptPayment, Job, Inscription, Employee, Transaction, Etudiant, Mois, Paiement, BankAccount, Receipt, ReceiptPayment, Utilisateur, Activity, AcademicYear, MonthlyReport, DailyAbsence, AccountCategory, Account
+from .models import Branche, Classe, Niveau, Agent, Receipt, ReceiptPayment, Job, Inscription, Garant, GarantPaiement, Employee, Transaction, Etudiant, Mois, Paiement, BankAccount, Receipt, ReceiptPayment, Utilisateur, Activity, AcademicYear, MonthlyReport, DailyAbsence, AccountCategory, Account
 from .serializers import *
 from rest_framework_simplejwt.views import TokenObtainPairView
 from rest_framework.decorators import api_view
@@ -91,6 +91,13 @@ class InscriptionViewSet(viewsets.ModelViewSet):
     filterset_fields = ['activity', 'student']
 
 
+class GarantViewSet(viewsets.ModelViewSet):
+    queryset = Garant.objects.all()
+    serializer_class = GarantSerializer
+    # filter_backends = [DjangoFilterBackend]
+    # filterset_fields = ['activity', 'student']
+
+
 class JobViewSet(viewsets.ModelViewSet):
     queryset = Job.objects.all()
     serializer_class = JobSerializer
@@ -142,7 +149,6 @@ class TransactionViewSet(viewsets.ModelViewSet):
         }, status=status.HTTP_201_CREATED)
 
 
-
 class PaiementViewSet(viewsets.ModelViewSet):
     queryset = Paiement.objects.all()
     serializer_class = PaiementSerializer
@@ -156,7 +162,6 @@ class PaiementViewSet(viewsets.ModelViewSet):
         data = request.data
         agent_id = data.get("agent")
         payments = data.get("payments")  # list of {student, month, due_amount, paid_amount}
-        payment_method = data.get("payment_method")
         bank_id = data.get("bank")
 
         if not payments:
@@ -203,7 +208,6 @@ class PaiementViewSet(viewsets.ModelViewSet):
                         paid_amount=p["paid_amount"],  # this transaction only
                         remaining_amount=new_remaining,
                         date=timezone.now(),
-                        payment_method=payment_method,
                         bank_id=bank_id,
                         user=request.user
                     )
@@ -217,7 +221,6 @@ class PaiementViewSet(viewsets.ModelViewSet):
                         due_amount=p["due_amount"],
                         paid_amount=new_paid,        # 🔹 cumulative paid
                         remaining_amount=new_remaining,
-                        payment_method=payment_method,
                         bank_id=bank_id,
                         agent_id=None,
                         user=request.user
@@ -263,7 +266,6 @@ class PaiementViewSet(viewsets.ModelViewSet):
                         paid_amount=p["paid_amount"],  # this transaction only
                         remaining_amount=new_remaining,
                         date=timezone.now(),
-                        payment_method=payment_method,
                         bank_id=bank_id,
                         user=request.user
                     )
@@ -277,13 +279,94 @@ class PaiementViewSet(viewsets.ModelViewSet):
                         due_amount=p["due_amount"],
                         paid_amount=new_paid,        # 🔹 cumulative paid
                         remaining_amount=new_remaining,
-                        payment_method=payment_method,
                         bank_id=bank_id,
                         agent_id=agent_id,
                         user=request.user
                     )
 
                     created_transactions.append(txn.id)
+
+        return Response({
+            "message": "Paiement traité avec succès",
+            "receipt_id": receipt.pk,
+            "receipt_date": receipt.receipt_date.strftime("%Y-%m-%d | %H:%M:%S"),
+            "transactions": created_transactions,
+            "created_by": request.user.first_name,
+        })
+
+
+class GarantPaiementViewSet(viewsets.ModelViewSet):
+    queryset = GarantPaiement.objects.all()
+    serializer_class = GarantPaiementSerializer
+    permission_classes = [IsAuthenticated] 
+
+    @action(detail=False, methods=['post'])
+    def process_payment(self, request):
+        data = request.data
+        payments = data.get("payments")  # list of {garant, month, due_amount, paid_amount}
+        bank_id = data.get("bank")
+
+        if not payments:
+            return Response({"error": "No payments provided"}, status=400)
+
+        with transaction.atomic():
+            # --- Paiement sans agent (pour un seul étudiant) ---
+            garant_id = data.get("garant")
+            if not garant_id:
+                return Response({"error": "No garant provided for payment"}, status=400)
+            garant = Garant.objects.get(id=garant_id)
+
+            receipt = Receipt.objects.create(
+                garant=garant,
+                agent_id=None,
+                total_amount=sum([p["paid_amount"] for p in payments]),
+                receipt_date=timezone.now(),
+                created_by=request.user,
+                receipt_description="Paiement des frais de scolarité"
+            )
+
+            created_transactions = []
+            for p in payments:
+                # 🔹 check if this month already has a GarantPaiement
+                existing = GarantPaiement.objects.filter(
+                    garant=garant,
+                    academic_year_id=p.get("academic_year"),
+                    month=p["month"]
+                ).order_by("-id").first()
+
+                if existing:
+                    new_paid = existing.paid_amount + p["paid_amount"]
+                    new_remaining = max(0, p["due_amount"] - new_paid)
+                else:
+                    new_paid = p["paid_amount"]
+                    new_remaining = max(0, p["due_amount"] - new_paid)
+
+                txn = Transaction.objects.create(
+                    garant=garant,
+                    agent_id=None,
+                    month=p["month"],
+                    due_amount=p["due_amount"],
+                    paid_amount=p["paid_amount"],  # this transaction only
+                    remaining_amount=new_remaining,
+                    date=timezone.now(),
+                    bank_id=bank_id,
+                    user=request.user
+                )
+
+                ReceiptPayment.objects.create(receipt=receipt, transaction=txn)
+
+                GarantPaiement.objects.create(
+                    garant=garant,
+                    academic_year_id=p.get("academic_year"),
+                    month=p["month"],
+                    due_amount=p["due_amount"],
+                    paid_amount=new_paid, 
+                    remaining_amount=new_remaining,
+                    bank_id=bank_id,
+                    user=request.user
+                )
+
+                created_transactions.append(txn.id)
 
         return Response({
             "message": "Paiement traité avec succès",
@@ -479,6 +562,76 @@ def student_payments(request):
                 paid_amount = Decimal("0.00")
                 remaining_amount = due_amount
                 status, status_bool = "unpaid", False
+
+        result.append({
+            "month": month,
+            "month_name_ar": arabic_months[month - 1],
+            "status": status,
+            "status_bool": status_bool,
+            "due_amount": float(due_amount),       # convert to float for JSON
+            "paid_amount": float(paid_amount),
+            "remaining_amount": float(remaining_amount)
+        })
+
+    return Response(result)
+
+
+
+
+@api_view(['GET'])
+def garant_payments(request):
+    garant_id = request.GET.get('garant_id')
+    year_id = request.GET.get('academic_year')
+    full_month_fee = request.GET.get('month_fee')
+
+    # Convert month_fee to Decimal
+    try:
+        full_month_fee = Decimal(full_month_fee) if full_month_fee else Decimal("0")
+    except:
+        return Response({"error": "Invalid month_fee value"}, status=400)
+
+    # Arabic month names
+    arabic_months = [
+        'يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو',
+        'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'
+    ]
+
+    # Validate garant + year
+    try:
+        garant = Garant.objects.get(id=garant_id)
+        academic_year = AcademicYear.objects.get(id=year_id)
+    except (Etudiant.DoesNotExist, AcademicYear.DoesNotExist):
+        return Response({"error": "Invalid garant or academic year"}, status=400)
+
+
+    # Get all recorded payments
+    payments = GarantPaiement.objects.filter(
+        garant=garant,
+        academic_year=academic_year
+    ).values('month', 'due_amount', 'paid_amount', 'remaining_amount')
+
+    payments_dict = {p['month']: p for p in payments}
+
+    result = []
+    for month in range(1, 12 + 1):
+
+        # Normal month
+        due_amount = full_month_fee
+        payment = payments_dict.get(month)
+        if payment:
+            paid_amount = payment['paid_amount']
+            remaining_amount = due_amount - paid_amount
+
+            if remaining_amount <= 0:
+                status, status_bool = "paid", True
+            elif paid_amount > 0:
+                status, status_bool = "partial", False
+            else:
+                status, status_bool = "unpaid", False
+        else:
+            paid_amount = Decimal("0.00")
+            remaining_amount = due_amount
+            status, status_bool = "unpaid", False
 
         result.append({
             "month": month,

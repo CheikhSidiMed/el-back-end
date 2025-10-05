@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Branche, Classe, Niveau, Agent, Etudiant, Mois, Paiement, Inscription, Employee, Job, BankAccount, Receipt, ReceiptPayment, Utilisateur, Activity, AcademicYear, MonthlyReport, DailyAbsence, AccountCategory, Account, Transaction
+from .models import Branche, Classe, Niveau, Agent, Etudiant, Mois, Paiement, Inscription, Garant, GarantPaiement, Employee, Job, BankAccount, Receipt, ReceiptPayment, Utilisateur, Activity, AcademicYear, MonthlyReport, DailyAbsence, AccountCategory, Account, Transaction
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
 
@@ -72,6 +72,11 @@ class PaiementSerializer(serializers.ModelSerializer):
         model = Paiement
         fields = '__all__'
 
+class GarantPaiementSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = GarantPaiement
+        fields = '__all__'
+
 class ReceiptSerializer(serializers.ModelSerializer):
     class Meta:
         model = Receipt
@@ -137,6 +142,7 @@ class InscriptionSerializer(serializers.ModelSerializer):
         model = Inscription
         fields = '__all__'
 
+
 class UtilisateurRegisterSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True)
 
@@ -179,6 +185,16 @@ class AccountSerializer(serializers.ModelSerializer):
     )
     class Meta:
         model = Account
+        fields = '__all__'
+
+class GarantSerializer(serializers.ModelSerializer):
+    account = AccountSerializer(read_only=True)
+
+    account_id = serializers.PrimaryKeyRelatedField(
+        queryset=Account.objects.all(), source='account', write_only=True, required=False
+    )
+    class Meta:
+        model = Garant
         fields = '__all__'
 
 class UtilisateurSerializer(serializers.ModelSerializer):
