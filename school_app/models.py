@@ -406,7 +406,7 @@ class Transaction(models.Model):
         null=True, blank=True,
         related_name='transactions'
     )
-    month = models.IntegerField(blank=True, null=True) 
+    month = models.TextField(blank=True, null=True) 
     due_amount = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal("0.00"))
     paid_amount = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal("0.00"))
     remaining_amount = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal("0.00"))
