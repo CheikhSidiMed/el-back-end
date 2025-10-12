@@ -107,26 +107,38 @@ class JobSerializer(serializers.ModelSerializer):
         model = Job
         fields = '__all__'
 
-class TransactionSerializer(serializers.ModelSerializer):
-    bank = BankAccountSerializer(read_only=True)
-
-    bank_id = serializers.PrimaryKeyRelatedField(
-        queryset=BankAccount.objects.all(), source='bank', write_only=True, required=True
-    )
-    receipt_id = serializers.SerializerMethodField()
-
-    class Meta:
-        model = Transaction
-        fields = '__all__'
-        
-    def get_receipt_id(self, obj):
-        receipt_payment = obj.receipt_payments.first()
-        return receipt_payment.receipt.receipt_id if receipt_payment else None
-
 class AccountCategorySerializer(serializers.ModelSerializer):
     class Meta:
         model = AccountCategory
         fields = '__all__'
+
+class AccountSerializer(serializers.ModelSerializer):
+    category = AccountCategorySerializer(read_only=True)
+    category_id = serializers.PrimaryKeyRelatedField(
+        queryset=AccountCategory.objects.all(),
+        source="category",
+        write_only=True
+    )
+    class Meta:
+        model = Account
+        fields = '__all__'
+
+class EmployeeSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Employee
+        fields = '__all__'
+
+    def create(self, validated_data):
+        employee = super().create(validated_data)
+
+        Utilisateur.objects.create(
+            phone=employee.phone,
+            role=employee.job,  # associer au job comme role
+            first_name=employee.full_name,  # pour cohérence
+            password=employee.phone  # mot de passe par défaut
+        )
+
+        return employee
 
 class InscriptionSerializer(serializers.ModelSerializer):
     student = EtudiantSerializer(read_only=True)
@@ -142,6 +154,58 @@ class InscriptionSerializer(serializers.ModelSerializer):
         model = Inscription
         fields = '__all__'
 
+class GarantSerializer(serializers.ModelSerializer):
+    account = AccountSerializer(read_only=True)
+
+    account_id = serializers.PrimaryKeyRelatedField(
+        queryset=Account.objects.all(), source='account', write_only=True, required=False
+    )
+    class Meta:
+        model = Garant
+        fields = '__all__'
+
+class TransactionSerializer(serializers.ModelSerializer):
+    bank = BankAccountSerializer(read_only=True)
+    bank_id = serializers.PrimaryKeyRelatedField(
+        queryset=BankAccount.objects.all(), source='bank', write_only=True, required=True
+    )
+    agent = AgentSerializer(read_only=True)
+    agent_id = serializers.PrimaryKeyRelatedField(
+        queryset=Agent.objects.all(), source='agent', write_only=True, required=True
+    )
+    garant = GarantSerializer(read_only=True)
+    garant_id = serializers.PrimaryKeyRelatedField(
+        queryset=Garant.objects.all(), source='garant', write_only=True, required=True
+    )
+    student = EtudiantSerializer(read_only=True)
+    student_id = serializers.PrimaryKeyRelatedField(
+        queryset=Etudiant.objects.all(), source='student', write_only=True, required=True
+    )
+    account = AccountSerializer(read_only=True)
+    account_id = serializers.PrimaryKeyRelatedField(
+        queryset=Account.objects.all(), source='account', write_only=True, required=True
+    )
+    employee = EmployeeSerializer(read_only=True)
+    employee_id = serializers.PrimaryKeyRelatedField(
+        queryset=Employee.objects.all(), source='employee', write_only=True, required=True
+    )
+    garant = GarantSerializer(read_only=True)
+    garant_id = serializers.PrimaryKeyRelatedField(
+        queryset=Garant.objects.all(), source='garant', write_only=True, required=True
+    )
+    inscription = InscriptionSerializer(read_only=True)
+    inscription_id = serializers.PrimaryKeyRelatedField(
+        queryset=Inscription.objects.all(), source='inscription', write_only=True, required=True
+    )
+    receipt_id = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Transaction
+        fields = '__all__'
+        
+    def get_receipt_id(self, obj):
+        receipt_payment = obj.receipt_payments.first()
+        return receipt_payment.receipt.receipt_id if receipt_payment else None
 
 class UtilisateurRegisterSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True)
@@ -156,46 +220,6 @@ class UtilisateurRegisterSerializer(serializers.ModelSerializer):
         user.set_password(password)
         user.save()
         return user
-
-class EmployeeSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = Employee
-        fields = '__all__'
-
-    def create(self, validated_data):
-        # 1️⃣ Créer l'employé
-        employee = super().create(validated_data)
-
-        # 2️⃣ Créer automatiquement un utilisateur
-        Utilisateur.objects.create(
-            phone=employee.phone,
-            role=employee.job,  # associer au job comme role
-            first_name=employee.full_name,  # pour cohérence
-            password=employee.phone  # mot de passe par défaut
-        )
-
-        return employee
-
-class AccountSerializer(serializers.ModelSerializer):
-    category = AccountCategorySerializer(read_only=True)
-    category_id = serializers.PrimaryKeyRelatedField(
-        queryset=AccountCategory.objects.all(),
-        source="category",
-        write_only=True
-    )
-    class Meta:
-        model = Account
-        fields = '__all__'
-
-class GarantSerializer(serializers.ModelSerializer):
-    account = AccountSerializer(read_only=True)
-
-    account_id = serializers.PrimaryKeyRelatedField(
-        queryset=Account.objects.all(), source='account', write_only=True, required=False
-    )
-    class Meta:
-        model = Garant
-        fields = '__all__'
 
 class UtilisateurSerializer(serializers.ModelSerializer):
     role = JobSerializer(read_only=True)
