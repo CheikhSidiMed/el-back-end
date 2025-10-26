@@ -5,6 +5,7 @@ from django.conf import settings
 from decimal import Decimal
 from django.conf import settings
 from django.utils import timezone
+from datetime import date
 
 
 class Job(models.Model):
@@ -111,7 +112,8 @@ class Etudiant(models.Model):
     gender = models.CharField(max_length=1, choices=[('M', 'ذكر'), ('F', 'أنثى')])
     birth_date = models.DateField(null=True, blank=True)
     birth_place = models.CharField(max_length=100, null=True, blank=True)
-    date_inscription = models.DateField(auto_now_add=True)
+    date_inscription = models.DateField(default=date.today)
+    date_count = models.DateField(auto_now_add=True)
     student_photo = models.ImageField(upload_to='etudiants_photos/', null=True, blank=True)
 
     payment_nature = models.CharField(
@@ -318,6 +320,8 @@ class Paiement(models.Model):
     agent = models.ForeignKey(Agent, on_delete=models.SET_NULL, null=True, blank=True)
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True)
 
+    
+
     def __str__(self):
         return f"{self.etudiant.student_name} - Mois: {self.month} - {self.academic_year.year}"
 
@@ -410,12 +414,10 @@ class Transaction(models.Model):
     due_amount = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal("0.00"))
     paid_amount = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal("0.00"))
     remaining_amount = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal("0.00"))
-    # date = models.DateField()
     date = models.DateTimeField(default=timezone.now)
 
     description = models.TextField(blank=True, null=True)
     type = models.CharField(max_length=20, choices=TRANSACTION_TYPE_CHOICES, default='plus')
-
 
     bank = models.ForeignKey(
         'BankAccount',
