@@ -9,6 +9,8 @@ from rest_framework.decorators import api_view
 from django.db import transaction
 from rest_framework.permissions import IsAuthenticated
 from django.db.models import Sum
+from calendar import monthrange
+from collections import defaultdict
 
 from rest_framework import viewsets
 from django_filters.rest_framework import DjangoFilterBackend
@@ -21,9 +23,9 @@ from calendar import monthrange
 from decimal import Decimal
 from rest_framework import status
 
-from django.db.models.signals import post_save
 from django.dispatch import receiver
 
+from django.db.models.signals import post_save, pre_save, post_delete
 
 
 class BrancheViewSet(viewsets.ModelViewSet):
@@ -46,7 +48,7 @@ class EtudiantViewSet(viewsets.ModelViewSet):
     queryset = Etudiant.objects.all()
     serializer_class = EtudiantSerializer
     filter_backends = [DjangoFilterBackend]
-    filterset_fields = ['agent_id'] 
+    filterset_fields = ['agent_id', 'payment_nature', 'branche_id', 'classe_id'] 
 
     def get_queryset(self):
         queryset = Etudiant.objects.all()
@@ -148,11 +150,29 @@ class TransactionViewSet(viewsets.ModelViewSet):
             "transaction": serializer.data
         }, status=status.HTTP_201_CREATED)
 
+    # Lors de la modification
+    def perform_update(self, serializer):
+        transaction = serializer.save()
+
+        return transaction
+
+    def update(self, request, *args, **kwargs):
+        partial = kwargs.pop('partial', False)
+        instance = self.get_object()
+        serializer = self.get_serializer(instance, data=request.data, partial=partial)
+        serializer.is_valid(raise_exception=True)
+        transaction = self.perform_update(serializer)
+
+        return Response({
+            "message": "تم تعديل المعاملة بنجاح ✅",
+            "transaction": TransactionSerializer(transaction).data
+        }, status=status.HTTP_200_OK)
 
 class PaiementViewSet(viewsets.ModelViewSet):
     queryset = Paiement.objects.all()
     serializer_class = PaiementSerializer
     permission_classes = [IsAuthenticated] 
+    filterset_fields = ['agent', 'etudiant']
 
     @action(detail=False, methods=['post'])
     def process_payment(self, request):
@@ -310,33 +330,30 @@ class PaiementViewSet(viewsets.ModelViewSet):
                         ReceiptPayment.objects.create(receipt=receipt, transaction=txn)
                         created_transactions.append(txn.id)
 
-                # 🔹 Create Paiement records for months
+                # 🔹 Créer ou mettre à jour les enregistrements de paiement pour chaque mois
                 for p in payments:
-                    existing = Paiement.objects.filter(
-                        etudiant=student,
-                        academic_year_id=p.get("academic_year"),
-                        month=p["month"]
-                    ).order_by("-id").first()
-
-                    if existing:
-                        new_paid = existing.paid_amount + p["paid_amount"]
-                        new_remaining = max(0, p["due_amount"] - new_paid)
-                    else:
-                        new_paid = p["paid_amount"]
-                        new_remaining = max(0, p["due_amount"] - new_paid)
-
-                    Paiement.objects.create(
+                    paiement, created = Paiement.objects.get_or_create(
                         etudiant=student,
                         academic_year_id=p.get("academic_year"),
                         month=p["month"],
-                        due_amount=p["due_amount"],
-                        paid_amount=new_paid,
-                        remaining_amount=new_remaining,
-                        bank_id=bank_id,
-                        agent_id=None,
-                        user=request.user
+                        defaults={
+                            "due_amount": p["due_amount"],
+                            "paid_amount": p["paid_amount"],
+                            "remaining_amount": max(0, p["due_amount"] - p["paid_amount"]),
+                            "bank_id": bank_id,
+                            "agent_id": None,
+                            "user": request.user
+                        }
                     )
 
+                    if not created:
+                        # 🔄 Mise à jour du paiement existant
+                        paiement.paid_amount += p["paid_amount"]
+                        paiement.remaining_amount = max(0, p["due_amount"] - paiement.paid_amount)
+                        paiement.due_amount = p["due_amount"]  # au cas où le montant dû change
+                        paiement.bank_id = bank_id
+                        paiement.user = request.user
+                        paiement.save()
 
             else:
                 # --- Paiement avec agent (plusieurs étudiants) ---
@@ -399,48 +416,40 @@ class PaiementViewSet(viewsets.ModelViewSet):
                         ReceiptPayment.objects.create(receipt=receipt, transaction=txn)
                         created_transactions.append(txn.id)
 
+
                 for p in payments:
                     student = Etudiant.objects.get(id=p["student"])
 
-                    # 🔹 check if this month already has a Paiement
-                    existing = Paiement.objects.filter(
-                        etudiant=student,
-                        academic_year_id=p.get("academic_year"),
-                        month=p["month"]
-                    ).order_by("-id").first()
-
-                    if existing:
-                        new_paid = existing.paid_amount + Decimal(str(p["paid_amount"]))
-                        new_remaining = max(Decimal('0.0'), Decimal(str(p["due_amount"])) - new_paid)
-                    else:
-                        new_paid = Decimal(str(p["paid_amount"]))
-                        new_remaining = max(Decimal('0.0'), Decimal(str(p["due_amount"])) - new_paid)
-
-                    # txn = Transaction.objects.create(
-                    #     student=student,
-                    #     agent_id=agent_id,
-                    #     month=p["month"],
-                    #     due_amount=p["due_amount"],
-                    #     paid_amount=p["paid_amount"],  # this transaction only
-                    #     remaining_amount=new_remaining,
-                    #     date=timezone.now(),
-                    #     bank_id=bank_id,
-                    #     user=request.user
-                    # )
-
-                    # ReceiptPayment.objects.create(receipt=receipt, transaction=txn)
-
-                    Paiement.objects.create(
+                    paiement, created = Paiement.objects.get_or_create(
                         etudiant=student,
                         academic_year_id=p.get("academic_year"),
                         month=p["month"],
-                        due_amount=p["due_amount"],
-                        paid_amount=new_paid,        # 🔹 cumulative paid
-                        remaining_amount=new_remaining,
-                        bank_id=bank_id,
-                        agent_id=agent_id,
-                        user=request.user
+                        defaults={
+                            "due_amount": Decimal(str(p["due_amount"])),
+                            "paid_amount": Decimal(str(p["paid_amount"])),
+                            "remaining_amount": max(
+                                Decimal('0.0'),
+                                Decimal(str(p["due_amount"])) - Decimal(str(p["paid_amount"]))
+                            ),
+                            "bank_id": bank_id,
+                            "agent_id": agent_id,
+                            "user": request.user
+                        }
                     )
+
+                    if not created:
+                        # 🔄 Paiement existe déjà → mise à jour du montant
+                        paiement.paid_amount += Decimal(str(p["paid_amount"]))
+                        paiement.due_amount = Decimal(str(p["due_amount"]))
+                        paiement.remaining_amount = max(
+                            Decimal('0.0'),
+                            paiement.due_amount - paiement.paid_amount
+                        )
+                        paiement.bank_id = bank_id
+                        paiement.agent_id = agent_id
+                        paiement.user = request.user
+                        paiement.save()
+
 
                     created_transactions.append(txn.id)
 
@@ -452,6 +461,71 @@ class PaiementViewSet(viewsets.ModelViewSet):
             "created_by": request.user.first_name,
         })
 
+    @action(detail=True, methods=['post'])
+    def delete_payment(self, request, pk=None):
+        """
+        Supprime un paiement et ajuste le solde de la banque + enregistre la transaction d'annulation.
+        """
+        try:
+            paiement = self.get_object()
+            bank = paiement.bank
+
+            with transaction.atomic():
+                paid_amount = Decimal(str(paiement.paid_amount))
+                student = paiement.etudiant
+
+                # 🔹 Supprimer le paiement
+                paiement.delete()
+
+                # 🔹 Mettre à jour le solde de la banque (si le modèle contient 'balance')
+                if bank and hasattr(bank, "balance"):
+                    bank.balance = Decimal(bank.balance) - Decimal(paid_amount)
+                    bank.save()
+                ARABIC_MONTHS = [
+                    "يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو",
+                    "يوليو", "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر"
+                ]
+                # 🔹 Créer une description lisible en arabe
+                month_name_ar = paiement.month_name if hasattr(paiement, "get_month_display") else ARABIC_MONTHS[int(paiement.month) - 1]
+                description = f"تم حذف دفعة الطالب(ة) {student.student_name} لشهر {month_name_ar} بمبلغ {paid_amount}."
+
+                # 🔹 Créer un reçu d'annulation
+                receipt = Receipt.objects.create(
+                    student=student,
+                    agent_id=None,
+                    total_amount=-paid_amount,  # montant négatif pour indiquer une suppression
+                    receipt_date=timezone.now(),
+                    created_by=request.user,
+                    receipt_description=description
+                )
+
+                # 🔹 Créer une transaction d'annulation
+                txn = Transaction.objects.create(
+                    student=student,
+                    agent_id=None,
+                    type='minus',
+                    month=paiement.month,
+                    due_amount=0,
+                    paid_amount=paid_amount,
+                    remaining_amount=0,
+                    date=timezone.now(),
+                    description=description,
+                    bank_id=bank.id if bank else None,
+                    user=request.user
+                )
+
+                ReceiptPayment.objects.create(receipt=receipt, transaction=txn)
+
+            return Response({
+                "message": "✅ Paiement supprimé avec succès.",
+                "bank": bank.id if bank else None,
+                "new_balance": str(bank.balance) if bank and hasattr(bank, "balance") else None
+            }, status=status.HTTP_200_OK)
+
+        except Paiement.DoesNotExist:
+            return Response({"error": "Paiement introuvable."}, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            return Response({"error": f"Erreur : {str(e)}"}, status=status.HTTP_400_BAD_REQUEST)
 
 class GarantPaiementViewSet(viewsets.ModelViewSet):
     queryset = GarantPaiement.objects.all()
@@ -612,6 +686,10 @@ from rest_framework.permissions import AllowAny
 class RegisterUserView(generics.CreateAPIView):
     serializer_class = UtilisateurRegisterSerializer
     permission_classes = [AllowAny]
+
+
+
+
 
 @api_view(['GET'])
 def daily_absence_list(request):
@@ -805,33 +883,110 @@ def garant_payments(request):
 
 
 
-@receiver(post_save, sender=Transaction)
-def update_account_balance(sender, instance, created, **kwargs):
-    if created and instance.bank:
-        if instance.type == "plus":  # Crédit
-            instance.bank.balance += instance.paid_amount
-        elif instance.type == "minus":  # Débit
-            instance.bank.balance -= instance.paid_amount
-        instance.bank.save()
-    if created and instance.account:
-        if instance.type == "plus":  # Crédit
-            instance.account.balance += instance.paid_amount
-        elif instance.type == "minus":  # Débit
-            instance.account.balance -= instance.paid_amount
-        instance.account.save()
-    if created and instance.employee:
-        if instance.type == "plus":  # Crédit
-            instance.employee.balance += instance.paid_amount
-        elif instance.type == "minus":  # Débit
-            instance.employee.balance -= instance.paid_amount
-        instance.employee.save()
-    if created and instance.inscription:
-        if instance.type == "plus":  # Crédit
-            instance.inscription.montant_pay += instance.paid_amount
-        elif instance.type == "minus":  # Débit
-            instance.inscription.montant_pay -= instance.paid_amount
-        instance.inscription.save()
+# @receiver(post_save, sender=Transaction)
+# def update_account_balance(sender, instance, created, **kwargs):
+#     if created and instance.bank:
+#         if instance.type == "plus":  # Crédit
+#             instance.bank.balance += instance.paid_amount
+#         elif instance.type == "minus":  # Débit
+#             instance.bank.balance -= instance.paid_amount
+#         instance.bank.save()
+#     if created and instance.account:
+#         if instance.type == "plus":  # Crédit
+#             instance.account.balance += instance.paid_amount
+#         elif instance.type == "minus":  # Débit
+#             instance.account.balance -= instance.paid_amount
+#         instance.account.save()
+#     if created and instance.employee:
+#         if instance.type == "plus":  # Crédit
+#             instance.employee.balance += instance.paid_amount
+#         elif instance.type == "minus":  # Débit
+#             instance.employee.balance -= instance.paid_amount
+#         instance.employee.save()
+#     if created and instance.inscription:
+#         if instance.type == "plus":  # Crédit
+#             instance.inscription.montant_pay += instance.paid_amount
+#         elif instance.type == "minus":  # Débit
+#             instance.inscription.montant_pay -= instance.paid_amount
+#         instance.inscription.save()
 
+# On sauvegarde l'ancien état avant la mise à jour
+@receiver(pre_save, sender=Transaction)
+def store_old_values(sender, instance, **kwargs):
+    if instance.pk:
+        try:
+            old_instance = Transaction.objects.get(pk=instance.pk)
+            instance._old_paid_amount = old_instance.paid_amount
+            instance._old_type = old_instance.type
+            instance._old_bank = old_instance.bank
+            instance._old_account = old_instance.account
+            instance._old_employee = old_instance.employee
+            instance._old_inscription = old_instance.inscription
+        except Transaction.DoesNotExist:
+            instance._old_paid_amount = 0
+            instance._old_type = None
+    else:
+        instance._old_paid_amount = 0
+        instance._old_type = None
+
+
+@receiver(post_save, sender=Transaction)
+def update_balances_on_save(sender, instance, created, **kwargs):
+    def update_balance(obj, field_name, amount, operation):
+        if not obj:
+            return
+        amount = Decimal(str(amount))
+        current_balance = getattr(obj, field_name, Decimal('0.0'))
+        if operation == "plus":
+            setattr(obj, field_name, current_balance + amount)
+        elif operation == "minus":
+            setattr(obj, field_name, current_balance - amount)
+        obj.save()
+
+    # Si c’est une nouvelle transaction
+    if created:
+        update_balance(instance.bank, "balance", instance.paid_amount, instance.type)
+        update_balance(instance.account, "balance", instance.paid_amount, instance.type)
+        update_balance(instance.employee, "balance", instance.paid_amount, instance.type)
+        update_balance(instance.inscription, "montant_pay", instance.paid_amount, instance.type)
+
+    # Si c’est une mise à jour
+    else:
+        old_amount = getattr(instance, "_old_paid_amount", 0)
+        old_type = getattr(instance, "_old_type", None)
+
+        # On annule l'ancien effet
+        if old_type:
+            reverse_op = "minus" if old_type == "plus" else "plus"
+            update_balance(instance._old_bank, "balance", old_amount, reverse_op)
+            update_balance(instance._old_account, "balance", old_amount, reverse_op)
+            update_balance(instance._old_employee, "balance", old_amount, reverse_op)
+            update_balance(instance._old_inscription, "montant_pay", old_amount, reverse_op)
+
+        # Puis on applique la nouvelle version
+        update_balance(instance.bank, "balance", instance.paid_amount, instance.type)
+        update_balance(instance.account, "balance", instance.paid_amount, instance.type)
+        update_balance(instance.employee, "balance", instance.paid_amount, instance.type)
+        update_balance(instance.inscription, "montant_pay", instance.paid_amount, instance.type)
+
+
+# Optionnel : si tu veux restaurer les soldes quand une transaction est supprimée
+@receiver(post_delete, sender=Transaction)
+def restore_balances_on_delete(sender, instance, **kwargs):
+    def update_balance(obj, field_name, amount, operation):
+        if not obj:
+            return
+        current_balance = getattr(obj, field_name, 0)
+        if operation == "plus":
+            setattr(obj, field_name, current_balance - amount)
+        elif operation == "minus":
+            setattr(obj, field_name, current_balance + amount)
+        obj.save()
+
+    update_balance(instance.bank, "balance", instance.paid_amount, instance.type)
+    update_balance(instance.account, "balance", instance.paid_amount, instance.type)
+    update_balance(instance.employee, "balance", instance.paid_amount, instance.type)
+    update_balance(instance.inscription, "montant_pay", instance.paid_amount, instance.type)
 
 
 @api_view(['GET'])
@@ -894,7 +1049,6 @@ def filter_transactions(request):
     })
 
 
-
 @api_view(['GET'])
 def filter_transactions_account(request):
     start_date = request.GET.get("start_date")
@@ -934,3 +1088,158 @@ def filter_transactions_account(request):
             "minus": total_minus
         },
     })
+
+
+
+# Tableau des mois en arabe
+ARABIC_MONTHS = [
+    "يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو",
+    "يوليو", "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر"
+]
+
+
+@api_view(['GET'])
+def unpaid_students(request):
+    branch_id = request.GET.get('branch_id')
+    class_id = request.GET.get('class_id')
+
+    students = Etudiant.objects.filter(is_inscrire=1)
+
+    if branch_id:
+        students = students.filter(branche_id=branch_id)
+    if class_id:
+        students = students.filter(classe_id=class_id)
+
+    result = []
+    current_date = date.today()
+    current_month = current_date.month
+    current_year = current_date.year
+
+    for student in students:
+        payments = Paiement.objects.filter(etudiant=student)
+        monthly_fee = student.remaining
+
+        total_unpaid = 0
+        months_unpaid = []
+
+        insc_date = student.date_inscription
+        insc_month = insc_date.month
+        insc_year = insc_date.year
+
+        # 🔹 Boucler uniquement jusqu’au mois courant
+        for month_number in range(insc_month, current_month + 1):
+            month_name = ARABIC_MONTHS[month_number - 1]
+            payments_for_month = payments.filter(month=month_number)
+            
+            if month_number == insc_month:
+                # Cas du mois d'inscription → frais proportionnels
+                days_in_month = monthrange(insc_year, insc_month)[1]
+                remaining_days = days_in_month - insc_date.day + 1
+                proportional_fee = Decimal(monthly_fee) * (Decimal(remaining_days) / Decimal(days_in_month))
+                
+                if payments_for_month.exists():
+                    total_paid = sum(p.paid_amount for p in payments_for_month)
+                    remaining_for_month = max(proportional_fee - total_paid, 0)
+                    if remaining_for_month > 0:
+                        months_unpaid.append(month_name)
+                        total_unpaid += float(remaining_for_month)
+                else:
+                    months_unpaid.append(month_name)
+                    total_unpaid += float(proportional_fee)
+            else:
+                # Mois après l'inscription
+                if payments_for_month.exists():
+                    total_remaining_month = sum(p.remaining_amount for p in payments_for_month)
+                    if total_remaining_month > 0:
+                        months_unpaid.append(month_name)
+                        total_unpaid += float(total_remaining_month)
+                else:
+                    months_unpaid.append(month_name)
+                    total_unpaid += float(monthly_fee)
+
+        result.append({
+            "id": student.id,
+            "student_name": student.student_name,
+            "branch_name": student.branche.nom,
+            "class_name": student.classe.nom,
+            "phone": student.agent.whatsapp_phone if student.agent and student.agent.whatsapp_phone else student.phone,
+            "months_unpaid": ", ".join(months_unpaid),
+            "unpaid_amount": total_unpaid,
+            "date_inscription": student.date_inscription,
+        })
+
+    return Response(result)
+
+
+
+@api_view(['GET'])
+def class_payment_stats(request):
+    branch_id = request.GET.get('branch_id')
+    month = request.GET.get('month')  # optionnel : filtrer sur un mois précis
+
+    students = Etudiant.objects.filter(is_inscrire=1)
+    if branch_id:
+        students = students.filter(branche_id=branch_id)
+
+    current_date = date.today()
+    current_month = int(month) if month else current_date.month
+    current_year = current_date.year
+
+    # Dictionnaire pour regrouper les stats par classe
+    class_stats = defaultdict(lambda: {
+        "class_name": "",
+        "total_students": 0,
+        "total_due": 0.0,
+        "total_paid": 0.0,
+        "total_unpaid": 0.0,
+    })
+
+    for student in students:
+        if not student.classe:
+            continue
+
+        classe_name = student.classe.nom
+        monthly_fee = student.remaining
+        payments = Paiement.objects.filter(etudiant=student)
+
+        total_due = 0
+        total_paid = 0
+        total_unpaid = 0
+
+        insc_date = student.date_inscription
+        insc_month = insc_date.month
+        insc_year = insc_date.year
+
+        # 🔹 Calculer seulement jusqu'au mois courant
+        for month_number in range(insc_month, current_month + 1):
+            payments_for_month = payments.filter(month=month_number)
+
+            # Si c’est le mois d’inscription → proportionnel
+            if month_number == insc_month:
+                days_in_month = monthrange(insc_year, insc_month)[1]
+                remaining_days = days_in_month - insc_date.day + 1
+                proportional_fee = Decimal(monthly_fee) * (Decimal(remaining_days) / Decimal(days_in_month))
+                month_due = proportional_fee
+            else:
+                month_due = Decimal(monthly_fee)
+
+            month_paid = sum(Decimal(p.paid_amount) for p in payments_for_month)
+            month_unpaid = max(month_due - month_paid, 0)
+
+            total_due += float(month_due)
+            total_paid += float(month_paid)
+            total_unpaid += float(month_unpaid)
+
+        # 🔹 Mise à jour des stats globales par classe
+        stats = class_stats[classe_name]
+        stats["class_name"] = classe_name
+        stats["total_students"] += 1
+        stats["total_due"] += total_due
+        stats["total_paid"] += total_paid
+        stats["total_unpaid"] += total_unpaid
+
+    # Transformer le dictionnaire en liste
+    result = list(class_stats.values())
+
+    return Response(result)
+

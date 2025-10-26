@@ -67,11 +67,6 @@ class MoisSerializer(serializers.ModelSerializer):
         model = Mois
         fields = '__all__'
 
-class PaiementSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = Paiement
-        fields = '__all__'
-
 class GarantPaiementSerializer(serializers.ModelSerializer):
     class Meta:
         model = GarantPaiement
@@ -171,31 +166,31 @@ class TransactionSerializer(serializers.ModelSerializer):
     )
     agent = AgentSerializer(read_only=True)
     agent_id = serializers.PrimaryKeyRelatedField(
-        queryset=Agent.objects.all(), source='agent', write_only=True, required=True
+        queryset=Agent.objects.all(), source='agent', write_only=True, required=False
     )
     garant = GarantSerializer(read_only=True)
     garant_id = serializers.PrimaryKeyRelatedField(
-        queryset=Garant.objects.all(), source='garant', write_only=True, required=True
+        queryset=Garant.objects.all(), source='garant', write_only=True, required=False
     )
     student = EtudiantSerializer(read_only=True)
     student_id = serializers.PrimaryKeyRelatedField(
-        queryset=Etudiant.objects.all(), source='student', write_only=True, required=True
+        queryset=Etudiant.objects.all(), source='student', write_only=True, required=False
     )
     account = AccountSerializer(read_only=True)
     account_id = serializers.PrimaryKeyRelatedField(
-        queryset=Account.objects.all(), source='account', write_only=True, required=True
+        queryset=Account.objects.all(), source='account', write_only=True, required=False
     )
     employee = EmployeeSerializer(read_only=True)
     employee_id = serializers.PrimaryKeyRelatedField(
-        queryset=Employee.objects.all(), source='employee', write_only=True, required=True
+        queryset=Employee.objects.all(), source='employee', write_only=True, required=False
     )
     garant = GarantSerializer(read_only=True)
     garant_id = serializers.PrimaryKeyRelatedField(
-        queryset=Garant.objects.all(), source='garant', write_only=True, required=True
+        queryset=Garant.objects.all(), source='garant', write_only=True, required=False
     )
     inscription = InscriptionSerializer(read_only=True)
     inscription_id = serializers.PrimaryKeyRelatedField(
-        queryset=Inscription.objects.all(), source='inscription', write_only=True, required=True
+        queryset=Inscription.objects.all(), source='inscription', write_only=True, required=False
     )
     receipt_id = serializers.SerializerMethodField()
 
@@ -271,3 +266,29 @@ class AcademicYearSerializer(serializers.ModelSerializer):
     class Meta:
         model  = AcademicYear
         fields = ("id", "year", "start_date", "end_date")
+
+
+class PaiementSerializer(serializers.ModelSerializer):
+    agent = AgentSerializer(read_only=True)
+    agent_id = serializers.PrimaryKeyRelatedField(
+        queryset=Agent.objects.all(), source='agent', write_only=True, required=False
+    )
+    etudiant = EtudiantSerializer(read_only=True)
+    etudiant_id = serializers.PrimaryKeyRelatedField(
+        queryset=Etudiant.objects.all(), source='etudiant', write_only=True, required=False
+    )
+    academic_year = AcademicYearSerializer(read_only=True)
+    academic_year_id = serializers.PrimaryKeyRelatedField(
+        queryset=AcademicYear.objects.all(), source='academic_year', write_only=True, required=False
+    )
+    bank = BankAccountSerializer(read_only=True)
+    bank_id = serializers.PrimaryKeyRelatedField(
+        queryset=BankAccount.objects.all(), source='bankAccount', write_only=True, required=False
+    )
+    user = UtilisateurSerializer(read_only=True)
+    user_id = serializers.PrimaryKeyRelatedField(
+        queryset=Utilisateur.objects.all(), source='user', write_only=True, required=False
+    )
+    class Meta:
+        model = Paiement
+        fields = '__all__'
