@@ -299,6 +299,40 @@ class Employee(models.Model):
     def __str__(self):
         return f"{self.full_name} ({self.number})"
 
+class SalaryPayment(models.Model):
+    employee = models.ForeignKey(
+        'Employee',
+        on_delete=models.CASCADE,
+        related_name='salary_payments'
+    )
+    academic_year = models.ForeignKey(
+        'AcademicYear',
+        on_delete=models.CASCADE,
+        related_name='salary_payments'
+    )
+    month = models.PositiveSmallIntegerField(
+        choices=[(i, f"{i:02d}") for i in range(1, 13)],
+        help_text="Mois du paiement (1-12)"
+    )
+    amount = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
+    date = models.DateField(auto_now_add=True)
+    note = models.TextField(blank=True, null=True)
+
+    class Meta:
+        verbose_name = "Paiement de salaire"
+        verbose_name_plural = "Paiements de salaires"
+        ordering = ['-academic_year', '-month']
+        # 🔒 Empêche deux salaires pour le même employé le même mois et année
+        constraints = [
+            models.UniqueConstraint(
+                fields=['employee', 'academic_year', 'month'],
+                name='unique_salary_per_employee_month_year'
+            )
+        ]
+
+    def __str__(self):
+        return f"{self.employee.full_name} - {self.month:02d}/{self.academic_year}"
+
 class BankAccount(models.Model):
     bank_name = models.CharField(max_length=100)
     account_number = models.CharField(max_length=100)

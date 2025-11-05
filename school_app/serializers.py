@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Branche, Classe, Niveau, Agent, Etudiant, Mois, Paiement, Inscription, Garant, GarantPaiement, Employee, Job, BankAccount, Receipt, ReceiptPayment, Utilisateur, Activity, AcademicYear, MonthlyReport, DailyAbsence, AccountCategory, Account, Transaction
+from .models import Branche, Classe, Niveau, Agent, Etudiant, Mois, Paiement, Inscription, Garant, GarantPaiement, SalaryPayment, Employee, Job, BankAccount, Receipt, ReceiptPayment, Utilisateur, Activity, AcademicYear, MonthlyReport, DailyAbsence, AccountCategory, Account, Transaction
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
 
@@ -119,6 +119,11 @@ class AccountSerializer(serializers.ModelSerializer):
         fields = '__all__'
 
 class EmployeeSerializer(serializers.ModelSerializer):
+    branche = BrancheSerializer(read_only=True)
+    branche_id = serializers.PrimaryKeyRelatedField(
+        queryset=Branche.objects.all(), source='branche', write_only=True, required=False, allow_null=True
+    )
+
     class Meta:
         model = Employee
         fields = '__all__'
@@ -134,6 +139,12 @@ class EmployeeSerializer(serializers.ModelSerializer):
         )
 
         return employee
+
+class SalaryPaymentSerializer(serializers.ModelSerializer):
+
+    class Meta:
+        model = SalaryPayment
+        fields = '__all__'
 
 class InscriptionSerializer(serializers.ModelSerializer):
     student = EtudiantSerializer(read_only=True)

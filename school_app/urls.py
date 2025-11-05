@@ -26,6 +26,8 @@ router.register(r'account-categorys', AccountCategoryViewSet, basename="account-
 
 router.register(r'transactions', TransactionViewSet, basename="transaction")
 router.register(r'employees', EmployeeViewSet, basename="employee")
+router.register(r'salary-payments', SalaryPaymentViewSet, basename='salary-payment')
+
 router.register(r'jobs', JobViewSet, basename="job")
 
 router.register(r'utilisateurs', UtilisateurViewSet, basename="utilisateur")

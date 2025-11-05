@@ -2,7 +2,7 @@ from django.shortcuts import render
 from rest_framework import viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
-from .models import Branche, Classe, Niveau, Agent, Receipt, ReceiptPayment, Job, Inscription, Garant, GarantPaiement, Employee, Transaction, Etudiant, Mois, Paiement, BankAccount, Receipt, ReceiptPayment, Utilisateur, Activity, AcademicYear, MonthlyReport, DailyAbsence, AccountCategory, Account
+from .models import Branche, Classe, Niveau, Agent, Receipt, SalaryPayment, ReceiptPayment, Job, Inscription, Garant, GarantPaiement, Employee, Transaction, Etudiant, Mois, Paiement, BankAccount, Receipt, ReceiptPayment, Utilisateur, Activity, AcademicYear, MonthlyReport, DailyAbsence, AccountCategory, Account
 from .serializers import *
 from rest_framework_simplejwt.views import TokenObtainPairView
 from rest_framework.decorators import api_view
@@ -635,8 +635,233 @@ class DailyAbsenceViewSet(viewsets.ModelViewSet):
 class EmployeeViewSet(viewsets.ModelViewSet):
     queryset = Employee.objects.all()
     serializer_class = EmployeeSerializer
+    filterset_fields = ['is_actif']
+
+    @action(detail=True, methods=['post'], url_path='activate')
+    def activate_employee(self, request, pk=None):
+        """
+        POST /api/employees/{id}/activate/
+        {
+            "subscription_date": "2025-11-03"
+        }
+        ➤ Réactive un employé et met à jour la date d'abonnement (تاريخ العودة للعمل)
+        """
+        try:
+            employee = self.get_object()
+        except Employee.DoesNotExist:
+            return Response({"success": False, "message": "الموظف غير موجود."}, status=404)
+
+        if employee.is_actif:
+            return Response({"success": False, "message": "الموظف نشط بالفعل."}, status=400)
+
+        # 🔹 Lire la date saisie
+        date_str = request.data.get("subscription_date")
+        if not date_str:
+            return Response(
+                {"success": False, "message": "يرجى إدخال تاريخ العودة إلى العمل."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            new_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+        except ValueError:
+            return Response(
+                {"success": False, "message": "تاريخ غير صالح."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # 🔹 Mise à jour
+        employee.is_actif = True
+        employee.subscription_date = new_date
+        employee.save(update_fields=["is_actif", "subscription_date"])
+
+        return Response(
+            {
+                "success": True,
+                "message": f"تم إعادة تفعيل {employee.full_name} بتاريخ {new_date}."
+            },
+            status=status.HTTP_200_OK
+        )
+
+    @action(detail=True, methods=['post'], url_path='dismiss')
+    def dismiss_employee(self, request, pk=None):
+        """
+        POST /api/employees/{id}/dismiss/
+        {
+        "date": "2025-11-02",
+        "confirm": true|false
+        }
+
+        ➤ Si confirm=False → calcule المستحقات فقط (prévisualisation)
+        ➤ Si confirm=True  → désactive l’employé et enregistre le montant dans balance
+        """
+        try:
+            employee = self.get_object()
+        except Employee.DoesNotExist:
+            return Response({"success": False, "message": "الموظف غير موجود."}, status=404)
+
+        # 🔹 Lire la date
+        date_str = request.data.get("date")
+        if not date_str:
+            return Response({"success": False, "message": "يرجى إدخال تاريخ الفصل."}, status=400)
+
+        try:
+            dismiss_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+        except ValueError:
+            return Response({"success": False, "message": "تاريخ غير صالح."}, status=400)
+
+        # 🔹 Trouver l’année académique correspondante
+        current_year = (
+            AcademicYear.objects
+            .order_by("-start_date")
+            .first()
+        )
+        if not current_year:
+            return Response({"success": False, "message": "لا توجد سنة مالية حالية."}, status=400)
+
+        month = dismiss_date.month
+
+        # 🔹 Vérifier si le salaire du mois est déjà payé
+        month_paid = SalaryPayment.objects.filter(
+            employee=employee, academic_year=current_year, month=month
+        ).exists()
+
+        current_month_salary = Decimal("0.00")
+        if not month_paid:
+            days_in_month = 30
+            worked_days = dismiss_date.day
+            prorata = Decimal(worked_days) / Decimal(days_in_month)
+            current_month_salary = (employee.salary or Decimal("0.00")) * prorata
+
+        total_due = (employee.balance or Decimal("0.00")) + current_month_salary
+
+        # 🔹 Mode prévisualisation ou confirmation
+        confirm = str(request.data.get("confirm", "false")).lower() == "true"
+
+        if confirm:
+            # ✅ On enregistre le solde et on désactive
+            with transaction.atomic():
+                employee.balance = total_due
+                employee.is_actif = False
+                employee.save(update_fields=["balance", "is_actif"])
+
+            return Response({
+                "success": True,
+                "message": f"تم فصل الموظف {employee.full_name} بتاريخ {dismiss_date}.",
+                "data": {
+                    "employee": employee.full_name,
+                    "new_balance": float(total_due),
+                    "dismiss_date": dismiss_date.strftime("%Y-%m-%d"),
+                    "month": month,
+                    "academic_year": current_year.year
+                }
+            }, status=200)
+
+        # 🟡 Sinon, simple prévisualisation
+        return Response({
+            "success": True,
+            "preview": True,
+            "data": {
+                "employee": employee.full_name,
+                "balance": float(employee.balance or 0),
+                "current_month_salary": float(current_month_salary),
+                "total_due": float(total_due),
+                "month": month,
+                "academic_year": current_year.year,
+                "dismiss_date": dismiss_date.strftime("%Y-%m-%d"),
+            }
+        }, status=200)
 
 
+class SalaryPaymentViewSet(viewsets.ModelViewSet):
+    queryset = SalaryPayment.objects.all()
+    serializer_class = SalaryPaymentSerializer
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        year = self.request.query_params.get('year')
+        month = self.request.query_params.get('month')
+        if year:
+            qs = qs.filter(academic_year__year=year)
+        if month:
+            qs = qs.filter(month=month)
+        return qs
+
+    @action(detail=False, methods=['post'], url_path='process')
+    def process_month(self, request):
+        """
+        POST /api/salary-payments/process/
+        {
+          "year": "2025-2026",
+          "month": 3,
+          "employees": [
+              {"id": 1, "amount": 500000},
+              {"id": 2, "amount": 450000}
+          ]
+        }
+        ➤ Crée des salaires pour les employés sélectionnés uniquement.
+        """
+        year_name = request.data.get("year")
+        month = request.data.get("month")
+        employees_data = request.data.get("employees", [])
+
+        if not year_name or not month:
+            return Response(
+                {"success": False, "message": "يجب تحديد السنة والشهر."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            academic_year = AcademicYear.objects.get(year=year_name)
+        except AcademicYear.DoesNotExist:
+            return Response(
+                {"success": False, "message": "السنة الأكاديمية غير موجودة."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        if not employees_data:
+            return Response(
+                {"success": False, "message": "لم يتم تحديد أي موظف."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        created, skipped = 0, 0
+
+        with transaction.atomic():
+            for e in employees_data:
+                emp_id = e.get("id")
+                amount = Decimal(str(e.get("amount", 0)))
+
+                try:
+                    emp = Employee.objects.get(id=emp_id, is_actif=True)
+                except Employee.DoesNotExist:
+                    skipped += 1
+                    continue
+
+                try:
+                    obj, created_flag = SalaryPayment.objects.get_or_create(
+                        employee=emp,
+                        academic_year=academic_year,
+                        month=month,
+                        defaults={
+                            "amount": amount,
+                            "note": f"Paiement manuel mois {month}",
+                        },
+                    )
+                    if created_flag:
+                        created += 1
+                    else:
+                        skipped += 1
+                except IntegrityError:
+                    skipped += 1
+
+        msg = f"تمت معالجة الرواتب لشهر {month} للسنة {year_name}."
+        if skipped:
+            msg += f" تم تخطي {skipped} موظف (مسجل مسبقاً أو غير صالح)."
+
+        return Response({"success": True, "message": msg})
+
+        
 class MonthlyReportViewSet(viewsets.ModelViewSet):
     queryset = MonthlyReport.objects.all()
     serializer_class = MonthlyReportSerializer
