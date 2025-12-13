@@ -90,8 +90,24 @@ DATABASES = {
         'PASSWORD': 'root',
         'HOST': 'localhost',
         'PORT': '5432',
+        'OPTIONS': {
+            'charset': 'utf8mb4',
+        },
+    },
+    'mysql_db': {
+        'ENGINE': 'django.db.backends.mysql',
+        'NAME': 'employeeleavedb',
+        'USER': 'root',
+        'PASSWORD': '',
+        'HOST': 'localhost',
+        'PORT': '3306',
+        'OPTIONS': {
+            'init_command': "SET sql_mode='STRICT_TRANS_TABLES'",
+            'charset': 'utf8mb4',
+        },
     }
 }
+DATABASES['mysql_db']['OPTIONS']['isolation_level'] = 'read committed'
 
 
 AUTH_PASSWORD_VALIDATORS = [
