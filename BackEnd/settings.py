@@ -108,7 +108,6 @@ DATABASES = {
         },
     }
 }
-DATABASES['mysql_db']['OPTIONS']['isolation_level'] = 'read committed'
 
 
 AUTH_PASSWORD_VALIDATORS = [
