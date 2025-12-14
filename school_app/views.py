@@ -2,7 +2,7 @@ from django.shortcuts import render
 from rest_framework import viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
-from .models import Branche, Classe, Niveau, Agent, Receipt, SalaryPayment, ReceiptPayment, Job, Inscription, Garant, GarantPaiement, Employee, Transaction, Etudiant, Mois, Paiement, BankAccount, Receipt, ReceiptPayment, Utilisateur, Activity, AcademicYear, MonthlyReport, DailyAbsence, AccountCategory, Account
+from .models import Branche, Classe, Niveau, Agent, Receipt, SalaryPayment, ReceiptPayment, Job, Inscription, Garant, GarantPaiement, Employee, Transaction, Etudiant, Mois, Paiement, BankAccount, Receipt, ReceiptPayment, Utilisateur, Activity, AcademicYear, MonthlyReport, DailyAbsence, AccountCategory, Account, Permission
 from .serializers import *
 from rest_framework_simplejwt.views import TokenObtainPairView
 from rest_framework.decorators import api_view
@@ -11,6 +11,7 @@ from rest_framework.permissions import IsAuthenticated
 from django.db.models import Sum
 from calendar import monthrange
 from collections import defaultdict
+from rest_framework.views import APIView
 
 from rest_framework import viewsets
 from django_filters.rest_framework import DjangoFilterBackend
@@ -35,7 +36,9 @@ class BrancheViewSet(viewsets.ModelViewSet):
 class ClasseViewSet(viewsets.ModelViewSet):
     queryset = Classe.objects.all()
     serializer_class = ClasseSerializer
-
+    filter_backends = [DjangoFilterBackend]
+    filterset_fields = ['branche']
+    
 class NiveauViewSet(viewsets.ModelViewSet):
     queryset = Niveau.objects.all()
     serializer_class = NiveauSerializer
@@ -48,7 +51,7 @@ class EtudiantViewSet(viewsets.ModelViewSet):
     queryset = Etudiant.objects.all()
     serializer_class = EtudiantSerializer
     filter_backends = [DjangoFilterBackend]
-    filterset_fields = ['agent_id', 'payment_nature', 'branche_id', 'classe_id'] 
+    filterset_fields = ['agent_id', 'payment_nature', 'branche_id', 'classe_id', 'classe'] 
 
     def get_queryset(self):
         queryset = Etudiant.objects.all()
@@ -613,6 +616,27 @@ class BankAccountViewSet(viewsets.ModelViewSet):
     queryset = BankAccount.objects.all()
     serializer_class = BankAccountSerializer
 
+class PermissionViewSet(viewsets.ModelViewSet):
+    queryset = Permission.objects.all()
+    serializer_class = PermissionSerializer
+
+class RolePermissionsView(APIView):
+    def get(self, request, role_code):
+        try:
+            job = Job.objects.get(title=role_code)
+        except Job.DoesNotExist:
+            return Response({"error": "Role not found"}, status=404)
+
+        serializer = JobSerializer(job)
+        return Response(serializer.data)
+
+class PermissionTreeAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        roots = Permission.objects.filter(parent__isnull=True)
+        serializer = PermissionTreeSerializer(roots, many=True)
+        return Response(serializer.data)
 
 class ReceiptViewSet(viewsets.ModelViewSet):
     queryset = Receipt.objects.all()

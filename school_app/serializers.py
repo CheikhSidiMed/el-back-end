@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Branche, Classe, Niveau, Agent, Etudiant, Mois, Paiement, Inscription, Garant, GarantPaiement, SalaryPayment, Employee, Job, BankAccount, Receipt, ReceiptPayment, Utilisateur, Activity, AcademicYear, MonthlyReport, DailyAbsence, AccountCategory, Account, Transaction
+from .models import Branche, Classe, Niveau, Agent, Etudiant, Mois, Paiement, Inscription, Garant, GarantPaiement, SalaryPayment, Employee, Job, BankAccount, Receipt, ReceiptPayment, Utilisateur, Activity, AcademicYear, MonthlyReport, DailyAbsence, AccountCategory, Account, Transaction, Permission
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
 
@@ -97,11 +97,6 @@ class BankAccountSerializer(serializers.ModelSerializer):
         model = BankAccount
         fields = '__all__'
 
-class JobSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = Job
-        fields = '__all__'
-
 class AccountCategorySerializer(serializers.ModelSerializer):
     class Meta:
         model = AccountCategory
@@ -146,6 +141,123 @@ class SalaryPaymentSerializer(serializers.ModelSerializer):
         model = SalaryPayment
         fields = '__all__'
 
+# class PermissionSerializer(serializers.ModelSerializer):
+#     children = serializers.SerializerMethodField()
+
+#     class Meta:
+#         model = Permission
+#         fields = ['id', 'code', 'label', 'parent', 'children']
+
+#     def get_children(self, obj):
+#         job_permissions = self.context.get('job_permissions')
+
+#         if not job_permissions:
+#             return []
+
+#         # فقط الأطفال الممنوحون فعليًا
+#         children = obj.children.filter(id__in=job_permissions)
+
+#         return PermissionSerializer(
+#             children,
+#             many=True,
+#             context=self.context
+#         ).data
+
+class PermissionSerializer(serializers.ModelSerializer):
+    children = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Permission
+        fields = ['id', 'code', 'label', 'parent', 'children']
+
+    def get_children(self, obj):
+        job_permissions = self.context.get('job_permissions')
+
+        if not job_permissions:
+            return []
+
+        children = obj.children.filter(id__in=job_permissions)
+
+        return PermissionSerializer(
+            children,
+            many=True,
+            context=self.context
+        ).data
+
+
+# class JobSerializer(serializers.ModelSerializer):
+#     permissions = PermissionSerializer(many=True, read_only=True)
+#     permission_ids = serializers.PrimaryKeyRelatedField(
+#         queryset=Permission.objects.all(),
+#         many=True,
+#         write_only=True,
+#         source='permissions'
+#     )
+
+#     class Meta:
+#         model = Job
+#         fields = [
+#             'id',
+#             'title',
+#             'description',
+#             'permissions',      # للعرض
+#             'permission_ids',   # للإضافة
+#         ]
+#     def get_permissions(self, obj):
+#         job_permissions = obj.permissions.values_list('id', flat=True)
+
+#         roots = obj.permissions.filter(parent__isnull=True)
+
+#         return PermissionSerializer(
+#             roots,
+#             many=True,
+#             context={'job_permissions': job_permissions}
+#         ).data
+
+class JobSerializer(serializers.ModelSerializer):
+    permissions = serializers.SerializerMethodField()
+    permission_ids = serializers.PrimaryKeyRelatedField(
+        queryset=Permission.objects.all(),
+        many=True,
+        write_only=True,
+        source='permissions'
+    )
+
+    class Meta:
+        model = Job
+        fields = [
+            'id',
+            'title',
+            'description',
+            'permissions',      # for display
+            'permission_ids',   # for create/update
+        ]
+
+    def get_permissions(self, obj):
+        job_permissions = obj.permissions.values_list('id', flat=True)
+
+        roots = Permission.objects.filter(
+            parent__isnull=True,
+            id__in=job_permissions
+        )
+
+        return PermissionSerializer(
+            roots,
+            many=True,
+            context={'job_permissions': job_permissions}
+        ).data
+
+class PermissionTreeSerializer(serializers.ModelSerializer):
+    children = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Permission
+        fields = ['id', 'code', 'label', 'children']
+
+    def get_children(self, obj):
+        children = obj.children.all()
+        return PermissionTreeSerializer(children, many=True).data
+        
 class InscriptionSerializer(serializers.ModelSerializer):
     student = EtudiantSerializer(read_only=True)
     activity = ActivitySerializer(read_only=True)

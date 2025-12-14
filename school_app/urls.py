@@ -36,6 +36,7 @@ router.register(r'inscriptions', InscriptionViewSet, basename="inscription")
 router.register(r'garants', GarantViewSet, basename="garant")
 router.register(r'garant-paiements', GarantPaiementViewSet, basename="garant-paiement")
 
+router.register(r'permissions', PermissionViewSet, basename="permission")
 
 urlpatterns = [
     path('api/', include(router.urls)),
@@ -50,5 +51,7 @@ urlpatterns = [
     path("api/token/refresh/", TokenRefreshView.as_view(), name="token_refresh"),
     path('api-auth/', include('rest_framework.urls')),
     path('api/register/', RegisterUserView.as_view(), name='register_user'),
+    path('api/role-permissions/<str:role_code>/', RolePermissionsView.as_view(), name='role-permissions'),
+    path('api/permissions-tree/', PermissionTreeAPIView.as_view(), name='permissions-tree'),
 
 ]

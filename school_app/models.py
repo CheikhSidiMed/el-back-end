@@ -7,6 +7,19 @@ from django.conf import settings
 from django.utils import timezone
 from datetime import date
 
+class Permission(models.Model):
+    code = models.CharField(max_length=100, unique=True)
+    label = models.CharField(max_length=150)
+    parent = models.ForeignKey(
+        'self',
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name='children'
+    )
+
+    def __str__(self):
+        return self.label
 
 class Job(models.Model):
     ROLES = (
@@ -19,7 +32,7 @@ class Job(models.Model):
     )
     title = models.CharField(max_length=150, choices=ROLES, unique=True, default='user')
     description = models.TextField(blank=True, null=True)
-    # role = models.CharField(max_length=30, choices=ROLES, default='user')
+    permissions = models.ManyToManyField(Permission, blank=True)
 
     def __str__(self):
         return self.title

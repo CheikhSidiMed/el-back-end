@@ -91,9 +91,6 @@ DATABASES = {
         'PASSWORD': 'root',
         'HOST': 'localhost',
         'PORT': '5432',
-        'OPTIONS': {
-            'charset': 'utf8mb4',
-        },
     },
     'mysql_db': {
         'ENGINE': 'django.db.backends.mysql',
