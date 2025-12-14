@@ -339,6 +339,39 @@ class UtilisateurRegisterSerializer(serializers.ModelSerializer):
         user.save()
         return user
 
+# class UtilisateurSerializer(serializers.ModelSerializer):
+#     role = JobSerializer(read_only=True)
+#     role_id = serializers.PrimaryKeyRelatedField(
+#         queryset=Job.objects.all(),
+#         source="role",
+#         write_only=True
+#     )
+    
+#     class Meta:
+#         model = Utilisateur
+#         fields = ['id', 'phone', 'role', 'role_id', 'first_name', 'password', 'created_at']
+#         extra_kwargs = {
+#             'password': {'write_only': True, 'required': False},
+#             'created_at': {'read_only': True}
+#         }
+
+#     def create(self, validated_data):
+#         password = validated_data.pop('password', None)
+#         user = Utilisateur(**validated_data)
+#         if password:
+#             user.set_password(password)
+#         user.save()
+#         return user
+
+#     def update(self, instance, validated_data):
+#         password = validated_data.pop('password', None)
+#         for attr, value in validated_data.items():
+#             setattr(instance, attr, value)
+#         if password:
+#             instance.set_password(password)
+#         instance.save()
+#         return instance
+
 class UtilisateurSerializer(serializers.ModelSerializer):
     role = JobSerializer(read_only=True)
     role_id = serializers.PrimaryKeyRelatedField(
@@ -346,30 +379,66 @@ class UtilisateurSerializer(serializers.ModelSerializer):
         source="role",
         write_only=True
     )
+
+    branches = BrancheSerializer(many=True, read_only=True)
+
+    branch_ids = serializers.PrimaryKeyRelatedField(
+        queryset=Branche.objects.all(),
+        many=True,
+        write_only=True,
+        source='branches'
+    )
+
     class Meta:
         model = Utilisateur
-        fields = ['id', 'phone', 'role', 'role_id', 'first_name', 'password', 'created_at']
+        fields = [
+            'id',
+            'phone',
+            'first_name',
+            'password',
+            'role',
+            'role_id',
+            'branches',
+            'branch_ids',
+            'created_at'
+        ]
         extra_kwargs = {
             'password': {'write_only': True, 'required': False},
             'created_at': {'read_only': True}
         }
 
     def create(self, validated_data):
+        branches = validated_data.pop('branches', [])
         password = validated_data.pop('password', None)
+
         user = Utilisateur(**validated_data)
         if password:
             user.set_password(password)
         user.save()
+
+        if branches:
+            user.branches.set(branches)
+
         return user
 
     def update(self, instance, validated_data):
+        branches = validated_data.pop('branches', None)
         password = validated_data.pop('password', None)
+
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
+
         if password:
             instance.set_password(password)
+
         instance.save()
+
+        if branches is not None:
+            instance.branches.set(branches)
+
         return instance
+
+
 
 class MyTokenObtainPairSerializer(TokenObtainPairSerializer):
     @classmethod

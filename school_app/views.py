@@ -30,8 +30,24 @@ from django.db.models.signals import post_save, pre_save, post_delete
 
 
 class BrancheViewSet(viewsets.ModelViewSet):
-    queryset = Branche.objects.all()
     serializer_class = BrancheSerializer
+    permission_classes = [IsAuthenticated]
+    def get_queryset(self):
+        user = self.request.user
+
+        if user.role and user.role.title == 'admin_g':
+            return Branche.objects.all()
+
+        return user.branche.all()
+
+    # def get_queryset(self):
+        user = self.request.user
+
+        # Superuser → toutes les branches
+        if user.is_superuser:
+            return Branche.objects.all()
+
+        return user.branches.all()
 
 class ClasseViewSet(viewsets.ModelViewSet):
     queryset = Classe.objects.all()

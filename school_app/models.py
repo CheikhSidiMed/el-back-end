@@ -35,7 +35,18 @@ class Job(models.Model):
     permissions = models.ManyToManyField(Permission, blank=True)
 
     def __str__(self):
-        return self.title
+        return self.title      
+
+class Branche(models.Model):
+    nom = models.CharField(max_length=100)
+    adresse = models.TextField()
+
+    def __str__(self):
+        return self.nom
+
+    class Meta:
+        verbose_name = "Branche"
+        verbose_name_plural = "Branches"
 
 class UtilisateurManager(BaseUserManager):
     def create_user(self, phone, password=None, **extra_fields):
@@ -62,12 +73,12 @@ class Utilisateur(AbstractUser):
         null=True, blank=True,
         related_name='utilisateur'
     )
+    branches = models.ManyToManyField(Branche, blank=True)
+    phone = models.CharField(max_length=15, unique=True, null=True, blank=True)
 
     username = None
     last_name = None
     email = None
-
-    phone = models.CharField(max_length=15, unique=True, null=True, blank=True)
 
     USERNAME_FIELD = 'phone'
     REQUIRED_FIELDS = []
@@ -78,18 +89,6 @@ class Utilisateur(AbstractUser):
 
     def __str__(self):
         return self.phone or "Utilisateur sans numéro"
-        
-
-class Branche(models.Model):
-    nom = models.CharField(max_length=100)
-    adresse = models.TextField()
-
-    def __str__(self):
-        return self.nom
-
-    class Meta:
-        verbose_name = "Branche"
-        verbose_name_plural = "Branches"
 
 class Classe(models.Model):
     nom = models.CharField(max_length=100)
