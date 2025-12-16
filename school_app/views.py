@@ -76,6 +76,7 @@ class EtudiantViewSet(viewsets.ModelViewSet):
         if inscrire_param is None:
             # Default: only enrolled
             queryset = queryset.filter(is_inscrire=1)
+            
         elif inscrire_param == '0':
             # Only not enrolled
             queryset = queryset.filter(is_inscrire=0)
@@ -977,55 +978,160 @@ def daily_absence_list(request):
 
 
 
+# @api_view(['GET'])
+# def student_payments(request):
+#     student_id = request.GET.get('student_id')
+#     year_id = request.GET.get('academic_year')
+#     full_month_fee = request.GET.get('month_fee')
+
+#     # Convert month_fee to Decimal
+#     try:
+#         full_month_fee = Decimal(full_month_fee) if full_month_fee else Decimal("0")
+#     except:
+#         return Response({"error": "Invalid month_fee value"}, status=400)
+
+#     # Arabic month names
+#     arabic_months = [
+#         'يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو',
+#         'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'
+#     ]
+
+#     # Validate student + year
+#     try:
+#         student = Etudiant.objects.get(id=student_id)
+#         academic_year = AcademicYear.objects.get(id=year_id)
+#     except (Etudiant.DoesNotExist, AcademicYear.DoesNotExist):
+#         return Response({"error": "Invalid student or academic year"}, status=400)
+
+#     registration_month = student.date_inscription.month
+#     registration_day = student.date_inscription.day
+
+#     # Get all recorded payments
+#     payments = Paiement.objects.filter(
+#         etudiant=student,
+#         academic_year=academic_year
+#     ).values('month', 'due_amount', 'paid_amount', 'remaining_amount')
+
+#     payments_dict = {p['month']: p for p in payments}
+
+#     result = []
+#     for month in range(1, 12 + 1):
+#         if month < registration_month:
+#             # Before registration month => considered paid
+#             status = "paid"
+#             status_bool = True
+#             due_amount = Decimal("0.00")
+#             paid_amount = Decimal("0.00")
+#             remaining_amount = Decimal("0.00")
+
+#         elif month == registration_month:
+#             # Prorated month
+#             days_in_month = monthrange(student.date_inscription.year, month)[1]
+#             proportion = Decimal(days_in_month - registration_day + 1) / Decimal(days_in_month)
+#             due_amount = (full_month_fee * proportion).quantize(Decimal("0.01"))
+
+#             payment = payments_dict.get(month)
+#             if payment:
+#                 paid_amount = payment['paid_amount']
+#                 remaining_amount = due_amount - paid_amount
+
+#                 if remaining_amount <= 0:
+#                     status, status_bool = "paid", True
+#                 elif paid_amount > 0:
+#                     status, status_bool = "partial", False
+#                 else:
+#                     status, status_bool = "unpaid", False
+#             else:
+#                 paid_amount = Decimal("0.00")
+#                 remaining_amount = due_amount
+#                 status, status_bool = "unpaid", False
+
+#         else:
+#             # Normal month
+#             due_amount = full_month_fee
+#             payment = payments_dict.get(month)
+#             if payment:
+#                 paid_amount = payment['paid_amount']
+#                 remaining_amount = due_amount - paid_amount
+
+#                 if remaining_amount <= 0:
+#                     status, status_bool = "paid", True
+#                 elif paid_amount > 0:
+#                     status, status_bool = "partial", False
+#                 else:
+#                     status, status_bool = "unpaid", False
+#             else:
+#                 paid_amount = Decimal("0.00")
+#                 remaining_amount = due_amount
+#                 status, status_bool = "unpaid", False
+
+#         result.append({
+#             "month": month,
+#             "month_name_ar": arabic_months[month - 1],
+#             "status": status,
+#             "status_bool": status_bool,
+#             "due_amount": float(due_amount),       # convert to float for JSON
+#             "paid_amount": float(paid_amount),
+#             "remaining_amount": float(remaining_amount)
+#         })
+
+#     return Response(result)
+
+
 @api_view(['GET'])
 def student_payments(request):
     student_id = request.GET.get('student_id')
     year_id = request.GET.get('academic_year')
     full_month_fee = request.GET.get('month_fee')
 
-    # Convert month_fee to Decimal
     try:
-        full_month_fee = Decimal(full_month_fee) if full_month_fee else Decimal("0")
+        full_month_fee = Decimal(full_month_fee)
     except:
-        return Response({"error": "Invalid month_fee value"}, status=400)
+        return Response({"error": "Invalid month_fee"}, status=400)
 
-    # Arabic month names
     arabic_months = [
         'يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو',
         'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'
     ]
 
-    # Validate student + year
     try:
         student = Etudiant.objects.get(id=student_id)
         academic_year = AcademicYear.objects.get(id=year_id)
-    except (Etudiant.DoesNotExist, AcademicYear.DoesNotExist):
+    except:
         return Response({"error": "Invalid student or academic year"}, status=400)
+
+    payments = Paiement.objects.filter(
+        etudiant=student,
+        academic_year=academic_year
+    ).values('month', 'paid_amount')
+
+    payments_dict = {p['month']: p for p in payments}
+
+    # 🔑 règle clé
+    # same_year = student.date_inscription.year == academic_year.year
+    academic_year_start = academic_year.start_date.year
+    academic_year_end = academic_year.end_date.year
+
+    same_year = academic_year_start <= student.date_inscription.year <= academic_year_end
 
     registration_month = student.date_inscription.month
     registration_day = student.date_inscription.day
 
-    # Get all recorded payments
-    payments = Paiement.objects.filter(
-        etudiant=student,
-        academic_year=academic_year
-    ).values('month', 'due_amount', 'paid_amount', 'remaining_amount')
-
-    payments_dict = {p['month']: p for p in payments}
-
     result = []
-    for month in range(1, 12 + 1):
-        if month < registration_month:
-            # Before registration month => considered paid
-            status = "paid"
-            status_bool = True
+
+    for month in range(1, 13):
+
+        # ============================
+        # CAS 1 : inscription même année
+        # ============================
+        if same_year and month < registration_month:
             due_amount = Decimal("0.00")
             paid_amount = Decimal("0.00")
             remaining_amount = Decimal("0.00")
+            status, status_bool = "paid", True
 
-        elif month == registration_month:
-            # Prorated month
-            days_in_month = monthrange(student.date_inscription.year, month)[1]
+        elif same_year and month == registration_month:
+            days_in_month = monthrange(academic_year_start, month)[1]
             proportion = Decimal(days_in_month - registration_day + 1) / Decimal(days_in_month)
             due_amount = (full_month_fee * proportion).quantize(Decimal("0.01"))
 
@@ -1045,10 +1151,13 @@ def student_payments(request):
                 remaining_amount = due_amount
                 status, status_bool = "unpaid", False
 
+        # ============================
+        # CAS 2 : année passée OU mois normaux
+        # ============================
         else:
-            # Normal month
             due_amount = full_month_fee
             payment = payments_dict.get(month)
+
             if payment:
                 paid_amount = payment['paid_amount']
                 remaining_amount = due_amount - paid_amount
@@ -1069,14 +1178,12 @@ def student_payments(request):
             "month_name_ar": arabic_months[month - 1],
             "status": status,
             "status_bool": status_bool,
-            "due_amount": float(due_amount),       # convert to float for JSON
+            "due_amount": float(due_amount),
             "paid_amount": float(paid_amount),
             "remaining_amount": float(remaining_amount)
         })
 
     return Response(result)
-
-
 
 
 @api_view(['GET'])
