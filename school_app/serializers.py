@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Branche, Classe, Niveau, Agent, Etudiant, Mois, Paiement, Inscription, Garant, GarantPaiement, SalaryPayment, Employee, Job, BankAccount, Receipt, ReceiptPayment, Utilisateur, Activity, AcademicYear, MonthlyReport, DailyAbsence, AccountCategory, Account, Transaction, Permission
+from .models import Branche, Classe, Niveau, Agent, Etudiant, Mois, Paiement, Inscription, Garant, GarantPaiement, SalaryPayment, Employee, Job, BankAccount, Receipt, ReceiptPayment, Utilisateur, Activity, AcademicYear, MonthlyReport, DailyAbsence, AccountCategory, Account, Transaction, Permission, Suspension
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
 
@@ -484,3 +484,39 @@ class PaiementSerializer(serializers.ModelSerializer):
     class Meta:
         model = Paiement
         fields = '__all__'
+
+
+class UnpaidMonthSerializer(serializers.Serializer):
+    academic_year = serializers.CharField()
+    month = serializers.IntegerField()
+    month_name_ar = serializers.CharField()
+    due_amount = serializers.DecimalField(max_digits=10, decimal_places=2)
+    paid_amount = serializers.DecimalField(max_digits=10, decimal_places=2)
+    remaining_amount = serializers.DecimalField(max_digits=10, decimal_places=2)
+
+class SuspensionSerializer(serializers.ModelSerializer):
+    student_name = serializers.CharField(source='student.full_name', read_only=True)
+    student_code = serializers.CharField(source='student.code', read_only=True)
+    created_by_name = serializers.CharField(source='created_by.get_full_name', read_only=True)
+    
+    class Meta:
+        model = Suspension
+        fields = [
+            'id',
+            'student',
+            'student_name',
+            'student_code',
+            'reason',
+            'suspend_date',
+            'created_at',
+            'created_by',
+            'created_by_name',
+            'total_unpaid',
+            'unpaid_months_data',
+            'monthly_fee',
+            'status',
+            'reactivation_date',
+            'reactivation_reason',
+            'notes',
+        ]
+        read_only_fields = ['created_at', 'created_by']

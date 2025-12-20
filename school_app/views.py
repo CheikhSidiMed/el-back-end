@@ -1,17 +1,18 @@
 from django.shortcuts import render
 from rest_framework import viewsets
-from rest_framework.decorators import action
 from rest_framework.response import Response
-from .models import Branche, Classe, Niveau, Agent, Receipt, SalaryPayment, ReceiptPayment, Job, Inscription, Garant, GarantPaiement, Employee, Transaction, Etudiant, Mois, Paiement, BankAccount, Receipt, ReceiptPayment, Utilisateur, Activity, AcademicYear, MonthlyReport, DailyAbsence, AccountCategory, Account, Permission
+from .models import Branche, Classe, Niveau, Agent, Receipt, SalaryPayment, ReceiptPayment, Job, Inscription, Garant, GarantPaiement, Employee, Transaction, Etudiant, Mois, Paiement, BankAccount, Receipt, ReceiptPayment, Utilisateur, Activity, AcademicYear, MonthlyReport, DailyAbsence, AccountCategory, Account, Permission, Suspension
 from .serializers import *
 from rest_framework_simplejwt.views import TokenObtainPairView
-from rest_framework.decorators import api_view
 from django.db import transaction
 from rest_framework.permissions import IsAuthenticated
+from rest_framework.decorators import api_view, permission_classes, action
+
 from django.db.models import Sum
 from calendar import monthrange
 from collections import defaultdict
 from rest_framework.views import APIView
+from dateutil.relativedelta import relativedelta
 
 from rest_framework import viewsets
 from django_filters.rest_framework import DjangoFilterBackend
@@ -27,6 +28,8 @@ from rest_framework import status
 from django.dispatch import receiver
 
 from django.db.models.signals import post_save, pre_save, post_delete
+from .pagination import EtudiantPagination
+from rest_framework import filters
 
 
 class BrancheViewSet(viewsets.ModelViewSet):
@@ -66,23 +69,21 @@ class AgentViewSet(viewsets.ModelViewSet):
 class EtudiantViewSet(viewsets.ModelViewSet):
     queryset = Etudiant.objects.all()
     serializer_class = EtudiantSerializer
-    filter_backends = [DjangoFilterBackend]
-    filterset_fields = ['agent_id', 'payment_nature', 'branche_id', 'classe_id', 'classe'] 
+    pagination_class = EtudiantPagination
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter]
+    search_fields = ['student_name', 'id', 'phone', 'agent__agent_name', 'agent__phone', 'agent__phone_2', 'agent__whatsapp_phone', 'classe__nom', 'branche__nom' ]
+    filterset_fields = ['agent_id', 'payment_nature', 'branche_id', 'classe_id', 'etat', 'classe'] 
 
     def get_queryset(self):
         queryset = Etudiant.objects.all()
         inscrire_param = self.request.query_params.get('inscrire', None)
 
         if inscrire_param is None:
-            # Default: only enrolled
             queryset = queryset.filter(is_inscrire=1)
-            
         elif inscrire_param == '0':
-            # Only not enrolled
             queryset = queryset.filter(is_inscrire=0)
         elif inscrire_param == '1':
-            # All students (ignore is_inscrire filter)
-            queryset = queryset
+            pass
 
         return queryset
 
@@ -672,6 +673,10 @@ class DailyAbsenceViewSet(viewsets.ModelViewSet):
     queryset = DailyAbsence.objects.all()
     serializer_class = DailyAbsenceSerializer
 
+class SuspensionViewSet(viewsets.ModelViewSet):
+    queryset = Suspension.objects.all()
+    serializer_class = SuspensionSerializer
+
 
 class EmployeeViewSet(viewsets.ModelViewSet):
     queryset = Employee.objects.all()
@@ -929,13 +934,33 @@ class UtilisateurViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'], url_path='change-password')
     def change_password(self, request, pk=None):
         user = self.get_object()
-        new_password = request.data.get('password')
-        if new_password:
-            user.set_password(new_password)
-            user.save()
-            return Response({'status': 'password updated'})
-        return Response({'error': 'Password not provided'}, status=400)
-        
+
+        current_password = request.data.get('current_password')
+        new_password = request.data.get('new_password')
+
+        # 🔒 تحقق من وجود البيانات
+        if not current_password or not new_password:
+            return Response(
+                {"detail": "البيانات غير مكتملة"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # 🔑 تحقق من كلمة المرور الحالية
+        if not user.check_password(current_password):
+            return Response(
+                {"detail": "كلمة المرور الحالية غير صحيحة"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # 🔁 تحديث كلمة المرور
+        user.set_password(new_password)
+        user.save()
+
+        return Response(
+            {"detail": "تم تحديث كلمة المرور بنجاح"},
+            status=status.HTTP_200_OK
+        )
+            
 
 class MyTokenObtainPairView(TokenObtainPairView):
     serializer_class = MyTokenObtainPairSerializer
@@ -1187,6 +1212,144 @@ def student_payments(request):
 
 
 @api_view(['GET'])
+def unpaid_months_until_suspend(request):
+    student_id = request.GET.get('student_id')
+    suspend_date = request.GET.get('suspend_date')
+    full_month_fee = request.GET.get('month_fee')
+
+    try:
+        suspend_date = date.fromisoformat(suspend_date)
+        full_month_fee = Decimal(full_month_fee)
+    except:
+        return Response({"error": "Invalid suspend_date or month_fee"}, status=400)
+
+    try:
+        student = Etudiant.objects.get(id=student_id)
+    except:
+        return Response({"error": "Student not found"}, status=404)
+
+    if suspend_date <= student.date_inscription:
+        return Response({"error": "Suspend before inscription"}, status=400)
+
+    arabic_months = [
+        'يناير','فبراير','مارس','أبريل','مايو','يونيو',
+        'يوليو','أغسطس','سبتمبر','أكتوبر','نوفمبر','ديسمبر'
+    ]
+
+    unpaid = []
+
+    # 🔑 toutes les années scolaires concernées
+    academic_years = AcademicYear.objects.filter(
+        start_date__lte=suspend_date
+    ).order_by('start_date')
+
+    for academic_year in academic_years:
+
+        payments = Paiement.objects.filter(
+            etudiant=student,
+            academic_year=academic_year
+        ).values('month', 'paid_amount')
+
+        payments_dict = {
+            p['month']: Decimal(p['paid_amount']) for p in payments
+        }
+
+        academic_year_start = academic_year.start_date.year
+        academic_year_end = academic_year.end_date.year
+
+        same_year = academic_year_start <= student.date_inscription.year <= academic_year_end
+        registration_month = student.date_inscription.month
+        registration_day = student.date_inscription.day
+
+        for month in range(1, 13):
+
+            month_start = date(academic_year_start, month, 1)
+            
+            # ❌ mois après suspension
+            if month_start >= suspend_date.replace(day=1) and academic_year_start == suspend_date.year and month > suspend_date.month:
+                continue
+
+            # ============================
+            # AVANT inscription
+            # ============================
+            if same_year and month < registration_month:
+                due_amount = Decimal("0.00")
+
+            # ============================
+            # MOIS inscription
+            # ============================
+            elif same_year and month == registration_month:
+                days = monthrange(academic_year_start, month)[1]
+                proportion = Decimal(days - registration_day + 1) / Decimal(days)
+                due_amount = (full_month_fee * proportion).quantize(Decimal("0.01"))
+
+            # ============================
+            # MOIS suspension (⚠️ jour exclu)
+            # ============================
+
+            elif (
+                (academic_year.start_date.year == suspend_date.year
+                or academic_year.end_date.year == suspend_date.year)
+                and month == suspend_date.month
+            ):
+                paid_amount = payments_dict.get(month, Decimal("0.00"))
+
+                days = monthrange(academic_year_start, month)[1]
+                days_present = suspend_date.day - 1  # ⚠️ jour exclu
+                proportion = Decimal(days_present) / Decimal(days)
+                due_amount = (full_month_fee * proportion).quantize(Decimal("0.01"))
+
+            # ============================
+            # MOIS normal
+            # ============================
+            else:
+                due_amount = full_month_fee
+
+            paid_amount = payments_dict.get(month, Decimal("0.00"))
+            remaining = due_amount - paid_amount
+
+            if remaining > 0:
+                unpaid.append({
+                    "academic_year": academic_year.year,
+                    "month": month,
+                    "month_name_ar": arabic_months[month - 1],
+                    "due_amount": float(due_amount),
+                    "paid_amount": float(paid_amount),
+                    "remaining_amount": float(remaining)
+                })
+
+    return Response({
+        "student_id": student.id,
+        "suspend_date": suspend_date,
+        "total_unpaid": float(sum(u["remaining_amount"] for u in unpaid)),
+        "unpaid_months": unpaid
+    })
+
+
+
+class ClasseEffectifAPIView(APIView):
+    def get(self, request, classe_id):
+        try:
+            classe = Classe.objects.get(id=classe_id)
+        except Classe.DoesNotExist:
+            return Response(
+                {"error": "Classe introuvable"},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        nombre_inscrits = classe.etudiants.filter(
+            etat='inscrit'
+        ).count()
+
+        return Response({
+            "classe_id": classe.id,
+            "classe": classe.nom,
+            "niveau": classe.niveau,
+            "totals": nombre_inscrits
+        })
+
+
+@api_view(['GET'])
 def garant_payments(request):
     garant_id = request.GET.get('garant_id')
     year_id = request.GET.get('academic_year')
@@ -1252,7 +1415,6 @@ def garant_payments(request):
         })
 
     return Response(result)
-
 
 
 # @receiver(post_save, sender=Transaction)
@@ -1615,3 +1777,124 @@ def class_payment_stats(request):
 
     return Response(result)
 
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def create_suspension(request):
+    """
+    Create a suspension record with unpaid months data
+    Expected POST data:
+    {
+        "student_id": 3,
+        "reason": "تأخر في الدفع",
+        "suspend_date": "2026-01-27",
+        "monthly_fee": 1200.00,
+        "unpaid_months_data": [...]  # From unpaid_months_until_suspend endpoint
+    }
+    """
+    try:
+        data = request.data
+        
+        # Validate required fields
+        required_fields = ['student_id', 'reason', 'suspend_date', 'monthly_fee', 'unpaid_months_data']
+        for field in required_fields:
+            if field not in data:
+                return Response(
+                    {"error": f"الحقل '{field}' مطلوب"},
+                    status=400
+                )
+        
+        # Get student
+        try:
+            student = Etudiant.objects.get(id=data['student_id'])
+        except Etudiant.DoesNotExist:
+            return Response({"error": "الطالب غير موجود"}, status=404)
+        
+        # Parse dates and amounts
+        try:
+            suspend_date = date.fromisoformat(data['suspend_date'])
+            monthly_fee = Decimal(str(data['monthly_fee']))
+        except (ValueError, TypeError):
+            return Response({"error": "تاريخ أو مبلغ غير صالح"}, status=400)
+        
+        # Calculate total unpaid from unpaid_months_data
+        unpaid_months = data.get('unpaid_months_data', [])
+        total_unpaid = sum(
+            Decimal(str(month.get('remaining_amount', 0)))
+            for month in unpaid_months
+        )
+        
+        # Create suspension record
+        with transaction.atomic():
+            suspension = Suspension.objects.create(
+                student=student,
+                reason=data['reason'],
+                suspend_date=suspend_date,
+                monthly_fee=monthly_fee,
+                total_unpaid=total_unpaid,
+                unpaid_months_data=unpaid_months,
+                created_by=request.user,
+                notes=data.get('notes', '')
+            )
+            
+            # Update student status (optional)
+            student.is_suspended = True
+            student.suspension_reason = data['reason']
+            student.date_desectivation = suspend_date
+            student.etat = "suspendu"
+            student.save()
+        
+        # Serialize and return response
+        from .serializers import SuspensionSerializer
+        serializer = SuspensionSerializer(suspension)
+        
+        return Response({
+            "success": True,
+            "message": "تم تعليق الطالب بنجاح",
+            "suspension_id": suspension.id,
+            "data": serializer.data
+        })
+        
+    except Exception as e:
+        return Response(
+            {"error": f"حدث خطأ: {str(e)}"},
+            status=500
+        )
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def reactivate_student(request, suspension_id):
+    """
+    Reactivate a suspended student
+    """
+    try:
+        suspension = Suspension.objects.get(id=suspension_id, status='active')
+        
+        data = request.data
+        reactivation_date = date.fromisoformat(data.get('reactivation_date', date.today().isoformat()))
+        
+        # Update suspension
+        suspension.status = 'completed'
+        suspension.reactivation_date = reactivation_date
+        suspension.reactivation_reason = data.get('reason', 'إعادة تنشيط الطالب')
+        suspension.save()
+        
+        # Update student
+        student = suspension.student
+        student.is_suspended = False
+        student.suspension_reason = ''
+        student.date_desectivation = None
+        student.date_inscription = reactivation_date
+        student.etat = "inscrit"
+        student.save()
+        
+        return Response({
+            "success": True,
+            "message": "تم إعادة تنشيط الطالب بنجاح"
+        })
+        
+    except Suspension.DoesNotExist:
+        return Response({"error": "تعليق غير موجود أو غير نشط"}, status=404)
+    except Exception as e:
+        return Response({"error": str(e)}, status=400)

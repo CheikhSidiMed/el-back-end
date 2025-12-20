@@ -37,6 +37,7 @@ router.register(r'garants', GarantViewSet, basename="garant")
 router.register(r'garant-paiements', GarantPaiementViewSet, basename="garant-paiement")
 
 router.register(r'permissions', PermissionViewSet, basename="permission")
+router.register(r'suspensions', SuspensionViewSet, basename="suspension")
 
 urlpatterns = [
     path('api/', include(router.urls)),
@@ -46,6 +47,7 @@ urlpatterns = [
     path('api/unpaid-students/', unpaid_students, name='unpaid-students'),
     path('api/class-stats/', class_payment_stats, name='class-stats'),
     path('api/student/payments/', student_payments, name='student-payments'),
+    path('api/student/unpaid-months/', unpaid_months_until_suspend, name='student-unpaid-months'),
     path('api/garant/payments/', garant_payments, name='garant-payments'),
     path('api/token/', MyTokenObtainPairView.as_view(), name='token_obtain_pair'),
     path("api/token/refresh/", TokenRefreshView.as_view(), name="token_refresh"),
@@ -53,5 +55,7 @@ urlpatterns = [
     path('api/register/', RegisterUserView.as_view(), name='register_user'),
     path('api/role-permissions/<str:role_code>/', RolePermissionsView.as_view(), name='role-permissions'),
     path('api/permissions-tree/', PermissionTreeAPIView.as_view(), name='permissions-tree'),
-
+    path('api/etudents-count-by-classes/<int:classe_id>/', ClasseEffectifAPIView.as_view(), name='etudents-count-by-classe'),
+    path('api/suspensions/create/', create_suspension, name='suspensions-create'),
+    path('api/suspensions/<int:classe_id>/reactivate/', reactivate_student, name='suspensions-reactivate'),
 ]

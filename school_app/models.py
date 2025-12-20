@@ -6,6 +6,9 @@ from decimal import Decimal
 from django.conf import settings
 from django.utils import timezone
 from datetime import date
+from django.contrib.postgres.fields import JSONField 
+from django.db.models import JSONField
+
 
 class Permission(models.Model):
     code = models.CharField(max_length=100, unique=True)
@@ -87,6 +90,13 @@ class Utilisateur(AbstractUser):
 
     objects = UtilisateurManager()
 
+    def get_full_name(self):
+        """
+        Retourne le nom complet lisible
+        """
+        full_name = f"{self.first_name or ''} {self.last_name or ''}".strip()
+        return full_name if full_name else self.phone
+
     def __str__(self):
         return self.phone or "Utilisateur sans numéro"
 
@@ -138,7 +148,7 @@ class Etudiant(models.Model):
     discount = models.DecimalField(max_digits=8, decimal_places=2, default=0)
     remaining = models.DecimalField(max_digits=8, decimal_places=2, default=0)
 
-    classe = models.ForeignKey('Classe', null=True, blank=True, on_delete=models.CASCADE)
+    classe = models.ForeignKey('Classe', null=True, blank=True, on_delete=models.CASCADE, related_name='etudiants')
     branche = models.ForeignKey('Branche', null=True, blank=True, on_delete=models.CASCADE)
     agent = models.ForeignKey('Agent', null=True, blank=True, on_delete=models.SET_NULL)
 
@@ -573,3 +583,116 @@ class ReceiptPayment(models.Model):
     def __str__(self):
         return f"ReceiptPayment: Receipt {self.receipt_id} - Transaction {self.transaction.id}"
 
+
+class Suspension(models.Model):
+    """Model to store student suspension information with unpaid months details"""
+    
+    SUSPENSION_STATUS = [
+        ('active', 'معلق فعلياً'),
+        ('completed', 'تم إنهاء التعليق'),
+        ('cancelled', 'ملغي'),
+    ]
+    
+    student = models.ForeignKey(
+        'Etudiant', 
+        on_delete=models.CASCADE,
+        related_name='suspensions',
+        verbose_name='الطالب'
+    )
+    
+    # Basic suspension info
+    reason = models.TextField(verbose_name='سبب التعليق')
+    suspend_date = models.DateField(verbose_name='تاريخ التعليق')
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='تاريخ الإنشاء')
+    created_by = models.ForeignKey(
+        'Utilisateur', 
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        verbose_name='تم التعليق بواسطة'
+    )
+    
+    # Unpaid months summary
+    total_unpaid = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=0,
+        verbose_name='إجمالي المبلغ المتبقي'
+    )
+    
+    # Detailed unpaid months data (stored as JSON)
+    unpaid_months_data = JSONField(
+        default=list,
+        verbose_name='تفاصيل الأشهر غير المدفوعة'
+    )
+    
+    # Student fee info at time of suspension
+    monthly_fee = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        verbose_name='القسط الشهري وقت التعليق'
+    )
+    
+    # Status tracking
+    status = models.CharField(
+        max_length=20,
+        choices=SUSPENSION_STATUS,
+        default='active',
+        verbose_name='حالة التعليق'
+    )
+    
+    # Reactivation info (if suspension ends)
+    reactivation_date = models.DateField(
+        null=True,
+        blank=True,
+        verbose_name='تاريخ إعادة التنشيط'
+    )
+    
+    reactivation_reason = models.TextField(
+        null=True,
+        blank=True,
+        verbose_name='سبب إعادة التنشيط'
+    )
+    
+    
+    notes = models.TextField(
+        null=True,
+        blank=True,
+        verbose_name='ملاحظات إضافية'
+    )
+    
+    class Meta:
+        verbose_name = 'تعليق طالب'
+        verbose_name_plural = 'تعليقات الطلاب'
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['student', 'status']),
+            models.Index(fields=['suspend_date']),
+            models.Index(fields=['status']),
+        ]
+    
+    def __str__(self):
+        return f"تعليق {self.student} - {self.suspend_date}"
+    
+    def save(self, *args, **kwargs):
+        # Calculate total unpaid if not set
+        if not self.total_unpaid and self.unpaid_months_data:
+            total = sum(Decimal(str(month.get('remaining_amount', 0))) 
+                       for month in self.unpaid_months_data)
+            self.total_unpaid = total
+        super().save(*args, **kwargs)
+    
+    def get_unpaid_months_count(self):
+        """Return number of unpaid months"""
+        return len(self.unpaid_months_data) if self.unpaid_months_data else 0
+    
+    def get_academic_years_affected(self):
+        """Return unique academic years in unpaid months"""
+        if not self.unpaid_months_data:
+            return []
+        years = set(month['academic_year'] for month in self.unpaid_months_data)
+        return sorted(list(years))
+    
+    @property
+    def is_active(self):
+        return self.status == 'active'
