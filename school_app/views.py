@@ -1637,7 +1637,7 @@ def unpaid_students(request):
     branch_id = request.GET.get('branch_id')
     class_id = request.GET.get('class_id')
 
-    students = Etudiant.objects.filter(is_inscrire=1)
+    students = Etudiant.objects.filter(is_inscrire=1, payment_nature='mensuel')
 
     if branch_id:
         students = students.filter(branche_id=branch_id)
