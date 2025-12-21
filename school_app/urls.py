@@ -56,6 +56,6 @@ urlpatterns = [
     path('api/role-permissions/<str:role_code>/', RolePermissionsView.as_view(), name='role-permissions'),
     path('api/permissions-tree/', PermissionTreeAPIView.as_view(), name='permissions-tree'),
     path('api/etudents-count-by-classes/<int:classe_id>/', ClasseEffectifAPIView.as_view(), name='etudents-count-by-classe'),
-    path('api/suspensions/create/', create_suspension, name='suspensions-create'),
+    path('api/suspensions-create/', create_suspension, name='suspension-create'),
     path('api/suspensions/<int:classe_id>/reactivate/', reactivate_student, name='suspensions-reactivate'),
 ]

@@ -35,13 +35,24 @@ from rest_framework import filters
 class BrancheViewSet(viewsets.ModelViewSet):
     serializer_class = BrancheSerializer
     permission_classes = [IsAuthenticated]
+
     def get_queryset(self):
         user = self.request.user
 
+        # admin général → كل الفروع
         if user.role and user.role.title == 'admin_g':
             return Branche.objects.all()
 
-        return user.branche.all()
+        # 🟢 ManyToMany: user.branches
+        if hasattr(user, 'branches'):
+            return user.branches.all()
+
+        # 🟡 ForeignKey: user.branche
+        if hasattr(user, 'branche') and user.branche:
+            return Branche.objects.filter(id=user.branche.id)
+
+        # 🔴 لا يملك أي فرع
+        return Branche.objects.none()
 
     # def get_queryset(self):
         user = self.request.user
@@ -1276,12 +1287,32 @@ def unpaid_months_until_suspend(request):
                 due_amount = Decimal("0.00")
 
             # ============================
+            # Cas spécial : inscription ET suspension le même mois
+            # ============================
+            elif (
+                same_year
+                and month == registration_month
+                and month == suspend_date.month
+            ):
+                days = monthrange(academic_year_start, month)[1]
+
+                days_present = suspend_date.day - registration_day  # ⚠️ jour suspension exclu
+
+                # sécurité
+                if days_present < 0:
+                    days_present = 0
+
+                proportion = Decimal(days_present) / Decimal(days)
+                due_amount = (full_month_fee * proportion).quantize(Decimal("0.01"))
+
+            # ============================
             # MOIS inscription
             # ============================
             elif same_year and month == registration_month:
                 days = monthrange(academic_year_start, month)[1]
                 proportion = Decimal(days - registration_day + 1) / Decimal(days)
                 due_amount = (full_month_fee * proportion).quantize(Decimal("0.01"))
+
 
             # ============================
             # MOIS suspension (⚠️ jour exclu)
@@ -1782,6 +1813,8 @@ def class_payment_stats(request):
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def create_suspension(request):
+    print("METHOD =", request.method)
+    return Response({"ok": True})
     """
     Create a suspension record with unpaid months data
     Expected POST data:
