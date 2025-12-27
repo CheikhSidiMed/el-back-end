@@ -38,6 +38,7 @@ router.register(r'garant-paiements', GarantPaiementViewSet, basename="garant-pai
 
 router.register(r'permissions', PermissionViewSet, basename="permission")
 router.register(r'suspensions', SuspensionViewSet, basename="suspension")
+router.register(r'absence-activitys', AbsenceActivityViewSet, basename="absence-activity")
 
 urlpatterns = [
     path('api/', include(router.urls)),

@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Branche, Classe, Niveau, Agent, Etudiant, Mois, Paiement, Inscription, Garant, GarantPaiement, SalaryPayment, Employee, Job, BankAccount, Receipt, ReceiptPayment, Utilisateur, Activity, AcademicYear, MonthlyReport, DailyAbsence, AccountCategory, Account, Transaction, Permission, Suspension
+from .models import Branche, Classe, Niveau, Agent, Etudiant, Mois, Paiement, Inscription, Garant, GarantPaiement, SalaryPayment, Employee, Job, BankAccount, Receipt, ReceiptPayment, Utilisateur, Activity, AcademicYear, MonthlyReport, DailyAbsence, AccountCategory, Account, Transaction, Permission, Suspension, AbsenceActivity
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
 
@@ -34,7 +34,13 @@ class AgentSerializer(serializers.ModelSerializer):
         model = Agent
         fields = '__all__'
 
+class AbsenceActivitySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = AbsenceActivity
+        fields = '__all__'
+
 class ActivitySerializer(serializers.ModelSerializer):
+    students_count = serializers.IntegerField(read_only=True)
     class Meta:
         model = Activity
         fields = '__all__'

@@ -1,14 +1,14 @@
 from django.shortcuts import render
 from rest_framework import viewsets
 from rest_framework.response import Response
-from .models import Branche, Classe, Niveau, Agent, Receipt, SalaryPayment, ReceiptPayment, Job, Inscription, Garant, GarantPaiement, Employee, Transaction, Etudiant, Mois, Paiement, BankAccount, Receipt, ReceiptPayment, Utilisateur, Activity, AcademicYear, MonthlyReport, DailyAbsence, AccountCategory, Account, Permission, Suspension
+from .models import Branche, Classe, Niveau, Agent, Receipt, SalaryPayment, ReceiptPayment, Job, Inscription, Garant, GarantPaiement, Employee, Transaction, Etudiant, Mois, Paiement, BankAccount, Receipt, ReceiptPayment, Utilisateur, Activity, AcademicYear, MonthlyReport, DailyAbsence, AccountCategory, Account, Permission, Suspension, AbsenceActivity
 from .serializers import *
 from rest_framework_simplejwt.views import TokenObtainPairView
 from django.db import transaction
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.decorators import api_view, permission_classes, action
 
-from django.db.models import Sum
+from django.db.models import Sum, Count
 from calendar import monthrange
 from collections import defaultdict
 from rest_framework.views import APIView
@@ -77,6 +77,12 @@ class AgentViewSet(viewsets.ModelViewSet):
     queryset = Agent.objects.all()
     serializer_class = AgentSerializer
 
+class AbsenceActivityViewSet(viewsets.ModelViewSet):
+    queryset = AbsenceActivity.objects.all()
+    serializer_class = AbsenceActivitySerializer
+    filter_backends = [DjangoFilterBackend]
+    filterset_fields = ['activity']
+
 class EtudiantViewSet(viewsets.ModelViewSet):
     queryset = Etudiant.objects.all()
     serializer_class = EtudiantSerializer
@@ -89,12 +95,11 @@ class EtudiantViewSet(viewsets.ModelViewSet):
         queryset = Etudiant.objects.all()
         inscrire_param = self.request.query_params.get('inscrire', None)
 
-        if inscrire_param is None:
+        if inscrire_param is None or inscrire_param == '1':
             queryset = queryset.filter(is_inscrire=1)
         elif inscrire_param == '0':
             queryset = queryset.filter(is_inscrire=0)
-        elif inscrire_param == '1':
-            pass
+
 
         return queryset
 
@@ -677,8 +682,15 @@ class ReceiptPaymentViewSet(viewsets.ModelViewSet):
     serializer_class = ReceiptPaymentSerializer
 
 class ActivityViewSet(viewsets.ModelViewSet):
-    queryset = Activity.objects.all()
+    # queryset = Activity.objects.all()
     serializer_class = ActivitySerializer
+    def get_queryset(self):
+        return (
+            Activity.objects
+            .annotate(
+                students_count=Count("inscription")
+            )
+        )
 
 class DailyAbsenceViewSet(viewsets.ModelViewSet):
     queryset = DailyAbsence.objects.all()

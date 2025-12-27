@@ -409,7 +409,7 @@ class Account(models.Model):
 class Inscription(models.Model):
     """Join table with extra fields for a student's registration to an activity"""
     student = models.ForeignKey(Etudiant, on_delete=models.CASCADE)
-    activity = models.ForeignKey(Activity, on_delete=models.CASCADE)
+    activity = models.ForeignKey(Activity, on_delete=models.CASCADE, related_name="inscription")
     montant = models.DecimalField(max_digits=8, decimal_places=2)  # amount paid
     montant_pay = models.DecimalField(max_digits=8, decimal_places=2, default=0)
     date_inscription = models.DateField(default=timezone.now)
@@ -696,3 +696,35 @@ class Suspension(models.Model):
     @property
     def is_active(self):
         return self.status == 'active'
+
+class AbsenceActivity(models.Model):
+    activity = models.ForeignKey(
+        Activity,
+        on_delete=models.CASCADE,
+        related_name='absences'
+    )
+
+    student = models.ForeignKey(
+        Etudiant,
+        on_delete=models.CASCADE,
+        related_name='activity_absences'
+    )
+
+    seance_number = models.PositiveIntegerField(
+        help_text="Numéro de la séance (1 → N)"
+    )
+
+    reason = models.CharField(
+        max_length=255,
+        blank=True,
+        null=True
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('activity', 'student', 'seance_number')
+        ordering = ['seance_number']
+
+    def __str__(self):
+        return f"{self.student} absent | {self.activity} | séance {self.seance_number}"
