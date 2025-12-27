@@ -189,6 +189,10 @@ class Etudiant(models.Model):
 
         super().save(*args, **kwargs)
 
+    @property
+    def full_name(self):
+        return self.student_name
+        
 class Mois(models.Model):
     numero = models.IntegerField()
     annee = models.IntegerField()
