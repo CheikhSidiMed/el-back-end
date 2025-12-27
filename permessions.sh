@@ -158,3 +158,6 @@ print("✅ All permissions inserted successfully")
     });
 
   }
+
+
+python manage.py createsuperuser
