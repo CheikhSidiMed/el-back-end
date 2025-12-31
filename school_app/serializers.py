@@ -1,11 +1,21 @@
 from rest_framework import serializers
-from .models import Branche, Classe, Niveau, Agent, Etudiant, Mois, Paiement, Inscription, Garant, GarantPaiement, SalaryPayment, Employee, Job, BankAccount, Receipt, ReceiptPayment, Utilisateur, Activity, AcademicYear, MonthlyReport, DailyAbsence, AccountCategory, Account, Transaction, Permission, Suspension, AbsenceActivity
+from .models import Branche, Classe, Niveau, Agent, Etudiant, Mois, Exam, Paiement, Inscription, Garant, GarantPaiement, SalaryPayment, Employee, Job, BankAccount, Receipt, ReceiptPayment, Utilisateur, Activity, AcademicYear, MonthlyReport, DailyAbsence, AccountCategory, Account, Transaction, Permission, Suspension, AbsenceActivity, AbsElmhdara
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
 
 class BrancheSerializer(serializers.ModelSerializer):
     class Meta:
         model = Branche
+        fields = '__all__'
+
+class ExamSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Exam
+        fields = '__all__'
+
+class AbsElmhdaraSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = AbsElmhdara
         fields = '__all__'
 
 class ClasseSerializer(serializers.ModelSerializer):
@@ -445,6 +455,21 @@ class UtilisateurSerializer(serializers.ModelSerializer):
         return instance
 
 
+class BankTransferSerializer(serializers.Serializer):
+    source_bank_id = serializers.IntegerField()
+    destination_bank_id = serializers.IntegerField()
+    amount = serializers.DecimalField(max_digits=10, decimal_places=2)
+    description = serializers.CharField(required=False, allow_blank=True)
+
+    def validate(self, data):
+        if data["source_bank_id"] == data["destination_bank_id"]:
+            raise serializers.ValidationError("لا يمكن التحويل إلى نفس الحساب")
+
+        source = BankAccount.objects.get(id=data["source_bank_id"])
+        if source.balance < data["amount"]:
+            raise serializers.ValidationError("الرصيد غير كافٍ")
+
+        return data
 
 class MyTokenObtainPairSerializer(TokenObtainPairSerializer):
     @classmethod

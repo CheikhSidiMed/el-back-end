@@ -1,7 +1,7 @@
 from django.shortcuts import render
 from rest_framework import viewsets
 from rest_framework.response import Response
-from .models import Branche, Classe, Niveau, Agent, Receipt, SalaryPayment, ReceiptPayment, Job, Inscription, Garant, GarantPaiement, Employee, Transaction, Etudiant, Mois, Paiement, BankAccount, Receipt, ReceiptPayment, Utilisateur, Activity, AcademicYear, MonthlyReport, DailyAbsence, AccountCategory, Account, Permission, Suspension, AbsenceActivity
+from .models import Branche, Classe, Niveau, Agent, Receipt, SalaryPayment, ReceiptPayment, Exam, AbsElmhdara, Job, Inscription, Garant, GarantPaiement, Employee, Transaction, Etudiant, Mois, Paiement, BankAccount, Receipt, ReceiptPayment, Utilisateur, Activity, AcademicYear, MonthlyReport, DailyAbsence, AccountCategory, Account, Permission, Suspension, AbsenceActivity
 from .serializers import *
 from rest_framework_simplejwt.views import TokenObtainPairView
 from django.db import transaction
@@ -30,6 +30,7 @@ from django.dispatch import receiver
 from django.db.models.signals import post_save, pre_save, post_delete
 from .pagination import EtudiantPagination
 from rest_framework import filters
+from django.db import transaction as db_transaction
 
 
 class BrancheViewSet(viewsets.ModelViewSet):
@@ -68,6 +69,17 @@ class ClasseViewSet(viewsets.ModelViewSet):
     serializer_class = ClasseSerializer
     filter_backends = [DjangoFilterBackend]
     filterset_fields = ['branche']
+
+class ExamViewSet(viewsets.ModelViewSet):
+    queryset = Exam.objects.all()
+    serializer_class = ExamSerializer
+    filter_backends = [DjangoFilterBackend]
+    # filterset_fields = ['branche']
+
+class AbsElmhdaraViewSet(viewsets.ModelViewSet):
+    queryset = AbsElmhdara.objects.all()
+    serializer_class = AbsElmhdaraSerializer
+    filter_backends = [DjangoFilterBackend]
     
 class NiveauViewSet(viewsets.ModelViewSet):
     queryset = Niveau.objects.all()
@@ -1003,6 +1015,52 @@ class RegisterUserView(generics.CreateAPIView):
 
 
 
+class BankTransferView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        serializer = BankTransferSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        source = BankAccount.objects.get(id=serializer.validated_data["source_bank_id"])
+        destination = BankAccount.objects.get(id=serializer.validated_data["destination_bank_id"])
+        amount = serializer.validated_data["amount"]
+        desc_extra = serializer.validated_data.get("description", "")
+
+        description = (
+            f"نقل الأموال من حساب {source.bank_name} ({source.account_number}) "
+            f"إلى حساب {destination.bank_name} ({destination.account_number})"
+        )
+        if desc_extra:
+            description += f" {{ {desc_extra} }}"
+
+        with db_transaction.atomic():
+
+            # 🔻 Transaction débit (source)
+            Transaction.objects.create(
+                bank=source,
+                paid_amount=amount,
+                type="minus",
+                description=description,
+                user=request.user,
+            )
+
+            # 🔺 Transaction crédit (destination)
+            Transaction.objects.create(
+                bank=destination,
+                paid_amount=amount,
+                type="plus",
+                description=description,
+                user=request.user,
+            )
+
+        return Response({
+            "message": "تم تحويل الأموال بنجاح",
+            "amount": amount,
+            "from": source.id,
+            "to": destination.id
+        })
+
 
 
 @api_view(['GET'])
@@ -1367,7 +1425,6 @@ def unpaid_months_until_suspend(request):
         "total_unpaid": float(sum(u["remaining_amount"] for u in unpaid)),
         "unpaid_months": unpaid
     })
-
 
 
 class ClasseEffectifAPIView(APIView):

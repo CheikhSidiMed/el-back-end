@@ -161,3 +161,5 @@ print("✅ All permissions inserted successfully")
 
 
 python manage.py createsuperuser
+21212123 Adm212121
+21212122 Adm212121 local

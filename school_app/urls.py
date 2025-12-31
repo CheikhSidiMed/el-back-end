@@ -39,6 +39,8 @@ router.register(r'garant-paiements', GarantPaiementViewSet, basename="garant-pai
 router.register(r'permissions', PermissionViewSet, basename="permission")
 router.register(r'suspensions', SuspensionViewSet, basename="suspension")
 router.register(r'absence-activitys', AbsenceActivityViewSet, basename="absence-activity")
+router.register(r'exams', ExamViewSet, basename="exam")
+router.register(r'abs-elmhdaras', AbsElmhdaraViewSet, basename="abs-elmhdara")
 
 urlpatterns = [
     path('api/', include(router.urls)),
@@ -59,4 +61,6 @@ urlpatterns = [
     path('api/etudents-count-by-classes/<int:classe_id>/', ClasseEffectifAPIView.as_view(), name='etudents-count-by-classe'),
     path('api/suspensions-create/', create_suspension, name='suspension-create'),
     path('api/suspensions/<int:classe_id>/reactivate/', reactivate_student, name='suspensions-reactivate'),
+    path("api/bank-transfer/", BankTransferView.as_view(), name="bank-transfer"),
+
 ]

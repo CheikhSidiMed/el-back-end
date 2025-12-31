@@ -9,7 +9,10 @@ from datetime import date
 from django.contrib.postgres.fields import JSONField 
 from django.db.models import JSONField
 
+def get_default_academic_year():
+    return AcademicYear.objects.order_by('-start_date').first()
 
+    
 class Permission(models.Model):
     code = models.CharField(max_length=100, unique=True)
     label = models.CharField(max_length=150)
@@ -192,7 +195,7 @@ class Etudiant(models.Model):
     @property
     def full_name(self):
         return self.student_name
-        
+
 class Mois(models.Model):
     numero = models.IntegerField()
     annee = models.IntegerField()
@@ -360,10 +363,16 @@ class SalaryPayment(models.Model):
         return f"{self.employee.full_name} - {self.month:02d}/{self.academic_year}"
 
 class BankAccount(models.Model):
+    CATEGORY = (
+        (1, 'صندوق'),
+        (2, 'بنك'),
+    )
     bank_name = models.CharField(max_length=100)
     account_number = models.CharField(max_length=100)
     balance = models.DecimalField(max_digits=13, decimal_places=2, default=0)
-
+    category = models.CharField(choices=CATEGORY, null=True, blank=True)
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name='bank_accounts')
+    
     def __str__(self):
         return f"{self.bank_name} - {self.account_number}"
 
@@ -587,7 +596,6 @@ class ReceiptPayment(models.Model):
     def __str__(self):
         return f"ReceiptPayment: Receipt {self.receipt_id} - Transaction {self.transaction.id}"
 
-
 class Suspension(models.Model):
     """Model to store student suspension information with unpaid months details"""
     
@@ -732,3 +740,58 @@ class AbsenceActivity(models.Model):
 
     def __str__(self):
         return f"{self.student} absent | {self.activity} | séance {self.seance_number}"
+
+class Exam(models.Model):
+    SEMESTER = (
+        ('s1', 'الفصل الأول'),
+        ('s2', 'الفصل الثاني'),
+        ('s3', 'الفصل الثالث'),
+        ('s4', 'الفصل الرابع'),
+    )
+    student = models.ForeignKey(Etudiant, on_delete=models.CASCADE, related_name='exams')
+    num_count = models.PositiveIntegerField(null=True, blank=True)
+    num_hivd = models.PositiveIntegerField(null=True, blank=True)
+    academic_year = models.ForeignKey('AcademicYear', on_delete=models.CASCADE, related_name='ac_exams', default=get_default_academic_year )
+
+    tjwid = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
+    moyen = models.DecimalField(max_digits=5, decimal_places=2, null=True,  blank=True)
+    houdour = models.DecimalField(max_digits=5, decimal_places=2, null=True,  blank=True)
+    NB = models.CharField(max_length=255, null=True, blank=True )
+    date = models.DateField(null=True, blank=True)
+    semester = models.CharField(max_length=150, choices=SEMESTER)
+
+    class Meta:
+        ordering = ['-date']
+
+    def __str__(self):
+        return f"Exam {self.id} - {self.student}"
+
+class AbsElmhdara(models.Model):
+    MONTH = (
+        (1, 'يناير'),
+        (2, 'فبراير'),
+        (3, 'مارس'),
+        (4, 'أبريل'),
+        (5, 'مايو'),
+        (6, 'يونيو'),
+        (7, 'يوليو'),
+        (8, 'أغسطس'),
+        (9, 'سبتمبر'),
+        (10, 'أكتوبر'),
+        (11, 'نوفمبر'),
+        (12, 'ديسمبر')
+    )
+    student = models.ForeignKey(Etudiant, on_delete=models.CASCADE, related_name='abs_elmhdara')
+    num_ab_ac = models.PositiveIntegerField(null=True, blank=True)
+    num_ab_no = models.PositiveIntegerField(null=True, blank=True)
+    academic_year = models.ForeignKey('AcademicYear', on_delete=models.CASCADE, related_name='ac_abs_els', default=get_default_academic_year )
+
+    NB = models.CharField(max_length=255, null=True, blank=True )
+    date = models.DateField(null=True, blank=True)
+    month = models.CharField(max_length=150, choices=MONTH)
+
+    class Meta:
+        ordering = ['-date']
+
+    def __str__(self):
+        return f"Exam {self.id} - {self.student}"
