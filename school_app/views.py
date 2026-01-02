@@ -33,6 +33,22 @@ from rest_framework import filters
 from django.db import transaction as db_transaction
 
 
+MONTHS_AR = {
+    1: "يناير",
+    2: "فبراير",
+    3: "مارس",
+    4: "أبريل",
+    5: "مايو",
+    6: "يونيو",
+    7: "يوليو",
+    8: "أغسطس",
+    9: "سبتمبر",
+    10: "أكتوبر",
+    11: "نوفمبر",
+    12: "ديسمبر",
+}
+
+
 class BrancheViewSet(viewsets.ModelViewSet):
     serializer_class = BrancheSerializer
     permission_classes = [IsAuthenticated]
@@ -240,155 +256,182 @@ class PaiementViewSet(viewsets.ModelViewSet):
             return Response({"error": "No payments provided"}, status=400)
 
         with transaction.atomic():
+
             # if not agent_id:
+            #     created_transactions = []
+
             #     # --- Paiement sans agent (pour un seul étudiant) ---
             #     student_id = data.get("student")
             #     if not student_id:
             #         return Response({"error": "No student provided for payment"}, status=400)
             #     student = Etudiant.objects.get(id=student_id)
 
+            #     # 🔹 Combine all items (months + extras)
+            #     total_amount = (
+            #         sum(p["paid_amount"] for p in payments)
+            #         + sum(e["amount"] for e in extras)
+            #     )
+
+            #     # 🔹 Build description
+            #     month_part = (
+            #         f" الأشهر: {', '.join(p['month_name_ar'] for p in payments)}"
+            #         if payments else ""
+            #     )
+            #     extra_part = (
+            #         " + " + ", ".join(e["des"] for e in extras)
+            #         if extras else ""
+            #     )
+            #     description = f"الطالب(ة) {payments[0]['student_name'] if payments else student.student_name}  سدد(ت) {month_part} {extra_part}"
+
+            #     # Create Receipt
             #     receipt = Receipt.objects.create(
             #         student=student,
             #         agent_id=None,
-            #         total_amount=sum(p["paid_amount"] for p in payments),
+            #         total_amount=total_amount,
             #         receipt_date=timezone.now(),
             #         created_by=request.user,
-            #         receipt_description=(
-            #             f"الطالب(ة) سدد(ت) {payments[0]['student_name']} الأشهر: "
-            #             f"{', '.join(p['month_name_ar'] for p in payments)}"
-            #         )
+            #         receipt_description=description
             #     )
 
-            #     txn = Transaction.objects.create(
-            #         student=student,
-            #         agent_id=None,
-            #         month=', '.join(p['month'] for p in payments),
-            #         due_amount=sum(p["due_amount"] for p in payments),
-            #         paid_amount=sum(p["paid_amount"] for p in payments),  # this transaction only
-            #         remaining_amount=sum(p["remaining_amount"] for p in payments),
-            #         date=timezone.now(),
-            #         description=(
-            #             f"الطالب(ة) سدد(ت) {payments[0]['student_name']} الأشهر: "
-            #             f"{', '.join(p['month_name_ar'] for p in payments)}"
+            #     # Create Transaction (global one for both months + extras)
+            #     if payments:
+            #         txn = Transaction.objects.create(
+            #             student=student,
+            #             agent_id=None,
+            #             month=', '.join(str(p["month"]) for p in payments) if payments else None,
+            #             due_amount=sum(p["due_amount"] for p in payments) if payments else 0,
+            #             paid_amount=total_amount,
+            #             remaining_amount=sum(p["remaining_amount"] for p in payments) if payments else 0,
+            #             date=timezone.now(),
+            #             description = f"الطالب(ة) {payments[0]['student_name']} سدد(ت) الأشهر: {{ {', '.join(p['month_name_ar'] for p in payments)} }}",
+            #             bank_id=bank_id,
+            #             user=request.user
             #         )
-            #         bank_id=bank_id,
-            #         user=request.user
-            #     )
+            #         ReceiptPayment.objects.create(receipt=receipt, transaction=txn)
+            #         created_transactions.append(txn.id)
 
-            #     ReceiptPayment.objects.create(receipt=receipt, transaction=txn)
+            #     if extras:
+            #         for ex in extras:
+            #             txn = Transaction.objects.create(
+            #                 student=student,
+            #                 agent_id=None,
+            #                 month=None,
+            #                 due_amount=0,
+            #                 paid_amount=ex["amount"],
+            #                 remaining_amount=0,
+            #                 date=timezone.now(),
+            #                 description = f"الطالب(ة) {ex['student_name']} سدد(ت) : {{ {ex['des']} }}",
+            #                 bank_id=bank_id,
+            #                 user=request.user
+            #             )
+            #             ReceiptPayment.objects.create(receipt=receipt, transaction=txn)
+            #             created_transactions.append(txn.id)
 
-
-            #     created_transactions = []
+            #     # 🔹 Créer ou mettre à jour les enregistrements de paiement pour chaque mois
             #     for p in payments:
-            #         # 🔹 check if this month already has a Paiement
-            #         existing = Paiement.objects.filter(
-            #             etudiant=student,
-            #             academic_year_id=p.get("academic_year"),
-            #             month=p["month"]
-            #         ).order_by("-id").first()
-
-            #         if existing:
-            #             new_paid = existing.paid_amount + p["paid_amount"]
-            #             new_remaining = max(0, p["due_amount"] - new_paid)
-            #         else:
-            #             new_paid = p["paid_amount"]
-            #             new_remaining = max(0, p["due_amount"] - new_paid)
-
-
-            #         Paiement.objects.create(
+            #         paiement, created = Paiement.objects.get_or_create(
             #             etudiant=student,
             #             academic_year_id=p.get("academic_year"),
             #             month=p["month"],
-            #             due_amount=p["due_amount"],
-            #             paid_amount=new_paid,        # 🔹 cumulative paid
-            #             remaining_amount=new_remaining,
-            #             bank_id=bank_id,
-            #             agent_id=None,
-            #             user=request.user
+            #             defaults={
+            #                 "due_amount": p["due_amount"],
+            #                 "paid_amount": p["paid_amount"],
+            #                 "remaining_amount": max(0, p["due_amount"] - p["paid_amount"]),
+            #                 "bank_id": bank_id,
+            #                 "agent_id": None,
+            #                 "user": request.user
+            #             }
             #         )
 
-            #         created_transactions.append(txn.id)
+            #         if not created:
+            #             # 🔄 Mise à jour du paiement existant
+            #             paiement.paid_amount += p["paid_amount"]
+            #             paiement.remaining_amount = max(0, p["due_amount"] - paiement.paid_amount)
+            #             paiement.due_amount = p["due_amount"]  # au cas où le montant dû change
+            #             paiement.bank_id = bank_id
+            #             paiement.user = request.user
+            #             paiement.save()
 
             if not agent_id:
                 created_transactions = []
 
-                # --- Paiement sans agent (pour un seul étudiant) ---
                 student_id = data.get("student")
                 if not student_id:
-                    return Response({"error": "No student provided for payment"}, status=400)
-                student = Etudiant.objects.get(id=student_id)
+                    return Response({"error": "No student provided"}, status=400)
 
-                # 🔹 Combine all items (months + extras)
-                total_amount = (
-                    sum(p["paid_amount"] for p in payments)
-                    + sum(e["amount"] for e in extras)
-                )
+                student = Etudiant.objects.get(pk=student_id)
 
-                # 🔹 Build description
-                month_part = (
-                    f" الأشهر: {', '.join(p['month_name_ar'] for p in payments)}"
-                    if payments else ""
-                )
-                extra_part = (
-                    " + " + ", ".join(e["des"] for e in extras)
-                    if extras else ""
-                )
-                description = f"الطالب(ة) {payments[0]['student_name'] if payments else student.student_name}  سدد(ت) {month_part} {extra_part}"
+                # 🔹 Totaux
+                total_due = sum(Decimal(str(p["due_amount"])) for p in payments)
+                total_paid_months = sum(Decimal(str(p["paid_amount"])) for p in payments)
+                total_extras = sum(Decimal(str(e["amount"])) for e in extras)
+                total_paid = total_paid_months + total_extras
+                total_remaining = max(Decimal("0.0"), total_due - total_paid_months)
 
-                # Create Receipt
+                months_str = ", ".join(str(p["month"]) for p in payments)
+                months_ar = ", ".join(p["month_name_ar"] for p in payments)
+
+                description = f"الطالب(ة) {student.student_name} سدد(ت) الأشهر: {{ {months_ar} }}"
+                if extras:
+                    description += " + " + ", ".join(e["des"] for e in extras)
+
+                # 🧾 Receipt
                 receipt = Receipt.objects.create(
                     student=student,
                     agent_id=None,
-                    total_amount=total_amount,
+                    total_amount=total_paid,
                     receipt_date=timezone.now(),
                     created_by=request.user,
                     receipt_description=description
                 )
 
-                # Create Transaction (global one for both months + extras)
+                # 💳 Transaction principale (mois)
                 if payments:
                     txn = Transaction.objects.create(
                         student=student,
                         agent_id=None,
-                        month=', '.join(str(p["month"]) for p in payments) if payments else None,
-                        due_amount=sum(p["due_amount"] for p in payments) if payments else 0,
-                        paid_amount=total_amount,
-                        remaining_amount=sum(p["remaining_amount"] for p in payments) if payments else 0,
+                        month=months_str,
+                        due_amount=total_due,
+                        paid_amount=total_paid_months,
+                        remaining_amount=total_remaining,
                         date=timezone.now(),
-                        description = f"الطالب(ة) {payments[0]['student_name']} سدد(ت) الأشهر: {{ {', '.join(p['month_name_ar'] for p in payments)} }}",
+                        description=description,
                         bank_id=bank_id,
                         user=request.user
                     )
                     ReceiptPayment.objects.create(receipt=receipt, transaction=txn)
-                    created_transactions.append(txn.id)
+                    created_transactions.append(txn.pk)
 
-                if extras:
-                    for ex in extras:
-                        txn = Transaction.objects.create(
-                            student=student,
-                            agent_id=None,
-                            month=None,
-                            due_amount=0,
-                            paid_amount=ex["amount"],
-                            remaining_amount=0,
-                            date=timezone.now(),
-                            description = f"الطالب(ة) {ex['student_name']} سدد(ت) : {{ {ex['des']} }}",
-                            bank_id=bank_id,
-                            user=request.user
-                        )
-                        ReceiptPayment.objects.create(receipt=receipt, transaction=txn)
-                        created_transactions.append(txn.id)
+                # ➕ Extras (transactions séparées)
+                for ex in extras:
+                    txn = Transaction.objects.create(
+                        student=student,
+                        agent_id=None,
+                        month=None,
+                        due_amount=0,
+                        paid_amount=Decimal(str(ex["amount"])),
+                        remaining_amount=0,
+                        date=timezone.now(),
+                        description=f"الطالب(ة) {student.student_name} سدد(ت): {{ {ex['des']} }}",
+                        bank_id=bank_id,
+                        user=request.user
+                    )
+                    ReceiptPayment.objects.create(receipt=receipt, transaction=txn)
+                    created_transactions.append(txn.pk)
 
-                # 🔹 Créer ou mettre à jour les enregistrements de paiement pour chaque mois
+                # 📊 Paiement (cumulatif par mois)
                 for p in payments:
                     paiement, created = Paiement.objects.get_or_create(
                         etudiant=student,
-                        academic_year_id=p.get("academic_year"),
+                        academic_year_id=p["academic_year"],
                         month=p["month"],
                         defaults={
-                            "due_amount": p["due_amount"],
-                            "paid_amount": p["paid_amount"],
-                            "remaining_amount": max(0, p["due_amount"] - p["paid_amount"]),
+                            "due_amount": Decimal(str(p["due_amount"])),
+                            "paid_amount": Decimal(str(p["paid_amount"])),
+                            "remaining_amount": max(
+                                Decimal("0.0"),
+                                Decimal(str(p["due_amount"])) - Decimal(str(p["paid_amount"]))
+                            ),
                             "bank_id": bank_id,
                             "agent_id": None,
                             "user": request.user
@@ -396,32 +439,139 @@ class PaiementViewSet(viewsets.ModelViewSet):
                     )
 
                     if not created:
-                        # 🔄 Mise à jour du paiement existant
-                        paiement.paid_amount += p["paid_amount"]
-                        paiement.remaining_amount = max(0, p["due_amount"] - paiement.paid_amount)
-                        paiement.due_amount = p["due_amount"]  # au cas où le montant dû change
+                        paiement.paid_amount += Decimal(str(p["paid_amount"]))
+                        paiement.remaining_amount = max(
+                            Decimal("0.0"),
+                            paiement.due_amount - paiement.paid_amount
+                        )
                         paiement.bank_id = bank_id
                         paiement.user = request.user
                         paiement.save()
 
+            # else:
+            #     # --- Paiement avec agent (plusieurs étudiants) ---
+            #     total_paid = (
+            #         sum(p["paid_amount"] for p in payments)
+            #         + sum(e["amount"] for e in extras)
+            #     )
+
+            #     # 🔹 Build description
+            #     month_part = (
+            #         f" الأشهر: {', '.join(p['month_name_ar'] for p in payments)}"
+            #         if payments else ""
+            #     )
+            #     extra_part = (
+            #         " + " + ", ".join(e["des"] for e in extras)
+            #         if extras else ""
+            #     )
+            #     description = f"الوكيل(ة) {agent_name}  دفع(ت) {month_part} {extra_part} "
+
+            #     receipt = Receipt.objects.create(
+            #         student=None,
+            #         agent_id=agent_id,
+            #         total_amount=total_paid,
+            #         receipt_date=timezone.now(),
+            #         created_by=request.user,
+            #         receipt_description=description
+            #     )
+
+            #     created_transactions = []
+            #     if payments:
+            #         txn = Transaction.objects.create(
+            #             student=None,
+            #             agent_id=agent_id,
+            #             month=', '.join(str(p["month"]) for p in payments) if payments else None,
+            #             due_amount=sum(p["due_amount"] for p in payments) if payments else 0,
+            #             paid_amount=total_paid,
+            #             remaining_amount=sum(p["remaining_amount"] for p in payments) if payments else 0,
+            #             date=timezone.now(),
+            #             description = f"الوكيل(ة) {agent_name} سدد(ت) الأشهر: {{ {', '.join(p['month_name_ar'] for p in payments)} }}",
+            #             bank_id=bank_id,
+            #             user=request.user
+            #         )
+            #         ReceiptPayment.objects.create(receipt=receipt, transaction=txn)
+            #         created_transactions.append(txn.id)
+
+            #     if extras:
+            #         for ex in extras:
+            #             txn = Transaction.objects.create(
+            #                 student=None,
+            #                 agent_id=agent_id,
+            #                 month=None,
+            #                 due_amount=0,
+            #                 paid_amount=ex["amount"],
+            #                 remaining_amount=0,
+            #                 date=timezone.now(),
+            #                 description = f"الوكيل(ة) {agent_name} سدد(ت) : {{ {ex['des']} }}",
+            #                 bank_id=bank_id,
+            #                 user=request.user
+            #             )
+            #             ReceiptPayment.objects.create(receipt=receipt, transaction=txn)
+            #             created_transactions.append(txn.id)
+
+
+            #     for p in payments:
+            #         student = Etudiant.objects.get(id=p["student"])
+
+            #         paiement, created = Paiement.objects.get_or_create(
+            #             etudiant=student,
+            #             academic_year_id=p.get("academic_year"),
+            #             month=p["month"],
+            #             defaults={
+            #                 "due_amount": Decimal(str(p["due_amount"])),
+            #                 "paid_amount": Decimal(str(p["paid_amount"])),
+            #                 "remaining_amount": max(
+            #                     Decimal('0.0'),
+            #                     Decimal(str(p["due_amount"])) - Decimal(str(p["paid_amount"]))
+            #                 ),
+            #                 "bank_id": bank_id,
+            #                 "agent_id": agent_id,
+            #                 "user": request.user
+            #             }
+            #         )
+
+            #         if not created:
+            #             # 🔄 Paiement existe déjà → mise à jour du montant
+            #             paiement.paid_amount += Decimal(str(p["paid_amount"]))
+            #             paiement.due_amount = Decimal(str(p["due_amount"]))
+            #             paiement.remaining_amount = max(
+            #                 Decimal('0.0'),
+            #                 paiement.due_amount - paiement.paid_amount
+            #             )
+            #             paiement.bank_id = bank_id
+            #             paiement.agent_id = agent_id
+            #             paiement.user = request.user
+            #             paiement.save()
+
+
+            #         created_transactions.append(txn.id)
+
             else:
-                # --- Paiement avec agent (plusieurs étudiants) ---
-                total_paid = (
-                    sum(p["paid_amount"] for p in payments)
-                    + sum(e["amount"] for e in extras)
-                )
+                # ================================
+                # 🔹 Paiement avec agent
+                # ================================
 
-                # 🔹 Build description
-                month_part = (
-                    f" الأشهر: {', '.join(p['month_name_ar'] for p in payments)}"
-                    if payments else ""
-                )
-                extra_part = (
-                    " + " + ", ".join(e["des"] for e in extras)
-                    if extras else ""
-                )
-                description = f"الوكيل(ة) {agent_name}  دفع(ت) {month_part} {extra_part} "
+                created_transactions = []
 
+                # 🔹 Totaux
+                total_due = sum(Decimal(str(p["due_amount"])) for p in payments)
+                total_paid_months = sum(Decimal(str(p["paid_amount"])) for p in payments)
+                total_extras = sum(Decimal(str(e["amount"])) for e in extras)
+                total_paid = total_paid_months + total_extras
+                total_remaining = max(Decimal("0.0"), total_due - total_paid_months)
+
+                # 🔹 Mois combinés
+                months_str = ", ".join(str(p["month"]) for p in payments)
+                months_ar = ", ".join(p["month_name_ar"] for p in payments)
+
+                # 🔹 Description
+                description = f"الوكيل(ة) {agent_name} سدد(ت) الأشهر: {{ {months_ar} }}"
+                if extras:
+                    description += " + " + ", ".join(e["des"] for e in extras)
+
+                # ================================
+                # 🧾 Receipt
+                # ================================
                 receipt = Receipt.objects.create(
                     student=None,
                     agent_id=agent_id,
@@ -431,53 +581,59 @@ class PaiementViewSet(viewsets.ModelViewSet):
                     receipt_description=description
                 )
 
-                created_transactions = []
+                # ================================
+                # 💳 Transaction principale (mois groupés)
+                # ================================
                 if payments:
                     txn = Transaction.objects.create(
                         student=None,
                         agent_id=agent_id,
-                        month=', '.join(str(p["month"]) for p in payments) if payments else None,
-                        due_amount=sum(p["due_amount"] for p in payments) if payments else 0,
-                        paid_amount=total_paid,
-                        remaining_amount=sum(p["remaining_amount"] for p in payments) if payments else 0,
+                        month=months_str,
+                        due_amount=total_due,
+                        paid_amount=total_paid_months,
+                        remaining_amount=total_remaining,
                         date=timezone.now(),
-                        description = f"الوكيل(ة) {agent_name} سدد(ت) الأشهر: {{ {', '.join(p['month_name_ar'] for p in payments)} }}",
+                        description=description,
                         bank_id=bank_id,
                         user=request.user
                     )
                     ReceiptPayment.objects.create(receipt=receipt, transaction=txn)
-                    created_transactions.append(txn.id)
+                    created_transactions.append(txn.pk)
 
-                if extras:
-                    for ex in extras:
-                        txn = Transaction.objects.create(
-                            student=None,
-                            agent_id=agent_id,
-                            month=None,
-                            due_amount=0,
-                            paid_amount=ex["amount"],
-                            remaining_amount=0,
-                            date=timezone.now(),
-                            description = f"الوكيل(ة) {agent_name} سدد(ت) : {{ {ex['des']} }}",
-                            bank_id=bank_id,
-                            user=request.user
-                        )
-                        ReceiptPayment.objects.create(receipt=receipt, transaction=txn)
-                        created_transactions.append(txn.id)
+                # ================================
+                # ➕ Transactions extras
+                # ================================
+                for ex in extras:
+                    txn = Transaction.objects.create(
+                        student=None,
+                        agent_id=agent_id,
+                        month=None,
+                        due_amount=0,
+                        paid_amount=Decimal(str(ex["amount"])),
+                        remaining_amount=0,
+                        date=timezone.now(),
+                        description=f"الوكيل(ة) {agent_name} سدد(ت): {{ {ex['des']} }}",
+                        bank_id=bank_id,
+                        user=request.user
+                    )
+                    ReceiptPayment.objects.create(receipt=receipt, transaction=txn)
+                    created_transactions.append(txn.pk)
 
-
+                # ================================
+                # 📊 Paiement (cumulatif par étudiant / mois)
+                # ================================
                 for p in payments:
-                    student = Etudiant.objects.get(id=p["student"])
+                    student = Etudiant.objects.get(pk=p["student"])
 
                     paiement, created = Paiement.objects.get_or_create(
                         etudiant=student,
-                        academic_year_id=p.get("academic_year"),
+                        academic_year_id=p["academic_year"],
                         month=p["month"],
                         defaults={
                             "due_amount": Decimal(str(p["due_amount"])),
                             "paid_amount": Decimal(str(p["paid_amount"])),
                             "remaining_amount": max(
-                                Decimal('0.0'),
+                                Decimal("0.0"),
                                 Decimal(str(p["due_amount"])) - Decimal(str(p["paid_amount"]))
                             ),
                             "bank_id": bank_id,
@@ -487,11 +643,9 @@ class PaiementViewSet(viewsets.ModelViewSet):
                     )
 
                     if not created:
-                        # 🔄 Paiement existe déjà → mise à jour du montant
                         paiement.paid_amount += Decimal(str(p["paid_amount"]))
-                        paiement.due_amount = Decimal(str(p["due_amount"]))
                         paiement.remaining_amount = max(
-                            Decimal('0.0'),
+                            Decimal("0.0"),
                             paiement.due_amount - paiement.paid_amount
                         )
                         paiement.bank_id = bank_id
@@ -500,7 +654,6 @@ class PaiementViewSet(viewsets.ModelViewSet):
                         paiement.save()
 
 
-                    created_transactions.append(txn.id)
 
         return Response({
             "message": "Paiement traité avec succès",
@@ -509,6 +662,7 @@ class PaiementViewSet(viewsets.ModelViewSet):
             "transactions": created_transactions,
             "created_by": request.user.first_name,
         })
+
 
     @action(detail=True, methods=['post'])
     def delete_payment(self, request, pk=None):
@@ -584,78 +738,180 @@ class GarantPaiementViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['post'])
     def process_payment(self, request):
         data = request.data
-        payments = data.get("payments")  # list of {garant, month, due_amount, paid_amount}
+        payments = data.get("payments")
         bank_id = data.get("bank")
+        garant_id = data.get("garant")
 
-        if not payments:
-            return Response({"error": "No payments provided"}, status=400)
+        if not payments or not garant_id:
+            return Response({"error": "Missing data"}, status=400)
 
         with transaction.atomic():
-            # --- Paiement sans agent (pour un seul étudiant) ---
-            garant_id = data.get("garant")
-            if not garant_id:
-                return Response({"error": "No garant provided for payment"}, status=400)
             garant = Garant.objects.get(id=garant_id)
 
+            # -------------------------------
+            # 🔹 COMBINAISON DES DONNÉES
+            # -------------------------------
+            months = []
+            total_due = 0
+            total_paid = 0
+
+            for p in payments:
+                months.append(p["month"])
+                total_due += p["due_amount"]
+                total_paid += p["paid_amount"]
+
+            remaining_amount = max(0, total_due - total_paid)
+            months_names = [MONTHS_AR.get(m, str(m)) for m in months]
+
+            # -------------------------------
+            # 🔹 RECEIPT
+            # -------------------------------
             receipt = Receipt.objects.create(
                 garant=garant,
                 agent_id=None,
-                total_amount=sum([p["paid_amount"] for p in payments]),
+                total_amount=total_paid,
                 receipt_date=timezone.now(),
                 created_by=request.user,
-                receipt_description="Paiement des frais de scolarité"
+                receipt_description=f"الكافل(ة) {garant.name} سدد(ت) الأشهر: {{ {', '.join(months_names)} }}"
+
             )
 
-            created_transactions = []
+            # -------------------------------
+            # 🔹 UNE SEULE TRANSACTION
+            # -------------------------------
+            txn = Transaction.objects.create(
+                garant=garant,
+                agent_id=None,
+                # month=", ".join(months),
+                description=f"الكافل(ة) {garant.name} سدد(ت) الأشهر: {{ {', '.join(months_names)} }}",
+                due_amount=total_due,
+                paid_amount=total_paid,
+                remaining_amount=remaining_amount,
+                date=timezone.now(),
+                bank_id=bank_id,
+                user=request.user
+            )
+
+            ReceiptPayment.objects.create(
+                receipt=receipt,
+                transaction=txn
+            )
+
+            # -------------------------------
+            # 🔹 GARANT PAIEMENT (par mois)
+            # -------------------------------
             for p in payments:
-                # 🔹 check if this month already has a GarantPaiement
-                existing = GarantPaiement.objects.filter(
-                    garant=garant,
-                    academic_year_id=p.get("academic_year"),
-                    month=p["month"]
-                ).order_by("-id").first()
-
-                if existing:
-                    new_paid = existing.paid_amount + p["paid_amount"]
-                    new_remaining = max(0, p["due_amount"] - new_paid)
-                else:
-                    new_paid = p["paid_amount"]
-                    new_remaining = max(0, p["due_amount"] - new_paid)
-
-                txn = Transaction.objects.create(
-                    garant=garant,
-                    agent_id=None,
-                    month=p["month"],
-                    due_amount=p["due_amount"],
-                    paid_amount=p["paid_amount"],  # this transaction only
-                    remaining_amount=new_remaining,
-                    date=timezone.now(),
-                    bank_id=bank_id,
-                    user=request.user
-                )
-
-                ReceiptPayment.objects.create(receipt=receipt, transaction=txn)
-
-                GarantPaiement.objects.create(
+                gp, _ = GarantPaiement.objects.get_or_create(
                     garant=garant,
                     academic_year_id=p.get("academic_year"),
                     month=p["month"],
-                    due_amount=p["due_amount"],
-                    paid_amount=new_paid, 
-                    remaining_amount=new_remaining,
-                    bank_id=bank_id,
-                    user=request.user
+                    defaults={
+                        "due_amount": p["due_amount"],
+                        "paid_amount": 0,
+                        "remaining_amount": p["due_amount"],
+                        "bank_id": bank_id,
+                        "user": request.user,
+                    }
                 )
 
-                created_transactions.append(txn.id)
+                gp.paid_amount += p["paid_amount"]
+                gp.remaining_amount = max(0, gp.due_amount - gp.paid_amount)
+                gp.bank_id = bank_id
+                gp.user = request.user
+                gp.save()
 
+        # return Response({
+        #     "message": "Paiement combiné avec succès",
+        #     "receipt_id": receipt.pk,
+        #     "transaction_id": txn.pk,
+        #     "months": txn.month,
+        #     "paid_amount": total_paid,
+        #     "remaining_amount": remaining_amount,
+        # })
         return Response({
             "message": "Paiement traité avec succès",
             "receipt_id": receipt.pk,
             "receipt_date": receipt.receipt_date.strftime("%Y-%m-%d | %H:%M:%S"),
-            "transactions": created_transactions,
+            "transactions": txn.description,
             "created_by": request.user.first_name,
         })
+
+
+    # @action(detail=False, methods=['post'])
+    # def process_payment(self, request):
+    #     data = request.data
+    #     payments = data.get("payments")  # list of {garant, month, due_amount, paid_amount}
+    #     bank_id = data.get("bank")
+
+    #     if not payments:
+    #         return Response({"error": "No payments provided"}, status=400)
+
+    #     with transaction.atomic():
+    #         # --- Paiement sans agent (pour un seul étudiant) ---
+    #         garant_id = data.get("garant")
+    #         if not garant_id:
+    #             return Response({"error": "No garant provided for payment"}, status=400)
+    #         garant = Garant.objects.get(id=garant_id)
+
+    #         receipt = Receipt.objects.create(
+    #             garant=garant,
+    #             agent_id=None,
+    #             total_amount=sum([p["paid_amount"] for p in payments]),
+    #             receipt_date=timezone.now(),
+    #             created_by=request.user,
+    #             receipt_description="Paiement des frais de scolarité"
+    #         )
+
+    #         created_transactions = []
+    #         for p in payments:
+    #             # 🔹 check if this month already has a GarantPaiement
+    #             existing = GarantPaiement.objects.filter(
+    #                 garant=garant,
+    #                 academic_year_id=p.get("academic_year"),
+    #                 month=p["month"]
+    #             ).order_by("-id").first()
+
+    #             if existing:
+    #                 new_paid = existing.paid_amount + p["paid_amount"]
+    #                 new_remaining = max(0, p["due_amount"] - new_paid)
+    #             else:
+    #                 new_paid = p["paid_amount"]
+    #                 new_remaining = max(0, p["due_amount"] - new_paid)
+
+    #             txn = Transaction.objects.create(
+    #                 garant=garant,
+    #                 agent_id=None,
+    #                 month=p["month"],
+    #                 due_amount=p["due_amount"],
+    #                 paid_amount=p["paid_amount"],  # this transaction only
+    #                 remaining_amount=new_remaining,
+    #                 date=timezone.now(),
+    #                 bank_id=bank_id,
+    #                 user=request.user
+    #             )
+
+    #             ReceiptPayment.objects.create(receipt=receipt, transaction=txn)
+
+    #             GarantPaiement.objects.create(
+    #                 garant=garant,
+    #                 academic_year_id=p.get("academic_year"),
+    #                 month=p["month"],
+    #                 due_amount=p["due_amount"],
+    #                 paid_amount=new_paid, 
+    #                 remaining_amount=new_remaining,
+    #                 bank_id=bank_id,
+    #                 user=request.user
+    #             )
+
+    #             created_transactions.append(txn.id)
+
+    #     return Response({
+    #         "message": "Paiement traité avec succès",
+    #         "receipt_id": receipt.pk,
+    #         "receipt_date": receipt.receipt_date.strftime("%Y-%m-%d | %H:%M:%S"),
+    #         "transactions": created_transactions,
+    #         "created_by": request.user.first_name,
+    #     })
 
 
 class BankAccountViewSet(viewsets.ModelViewSet):

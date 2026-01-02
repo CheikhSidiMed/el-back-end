@@ -173,7 +173,7 @@ class Etudiant(models.Model):
     current_city = models.CharField(max_length=100, null=True, blank=True)
     etat = models.CharField(
         max_length=50,
-        choices=[('inscrit', 'Inscrit'), ('suspendu', 'Suspendu')],
+        choices=[('inscrit', 'Inscrit'), ('suspendu', 'Suspendu'), ('en_attente', 'En attente')],
         default='inscrit'
     )
 
