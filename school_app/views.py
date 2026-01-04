@@ -1989,12 +1989,181 @@ ARABIC_MONTHS = [
 ]
 
 
+# @api_view(['GET'])
+# def unpaid_students(request):
+#     branch_id = request.GET.get('branch_id')
+#     class_id = request.GET.get('class_id')
+
+#     students = Etudiant.objects.filter(is_inscrire=1, payment_nature='mensuel')
+
+#     if branch_id:
+#         students = students.filter(branche_id=branch_id)
+#     if class_id:
+#         students = students.filter(classe_id=class_id)
+
+#     result = []
+#     current_date = date.today()
+#     current_month = current_date.month
+#     current_year = current_date.year
+
+#     for student in students:
+#         payments = Paiement.objects.filter(etudiant=student)
+#         monthly_fee = student.remaining
+
+#         total_unpaid = 0
+#         months_unpaid = []
+
+#         insc_date = student.date_inscription
+#         insc_month = insc_date.month
+#         insc_year = insc_date.year
+
+#         # 🔹 Boucler uniquement jusqu’au mois courant
+#         for month_number in range(insc_month, current_month + 1):
+#             month_name = ARABIC_MONTHS[month_number - 1]
+#             payments_for_month = payments.filter(month=month_number)
+            
+#             if month_number == insc_month:
+#                 # Cas du mois d'inscription → frais proportionnels
+#                 days_in_month = monthrange(insc_year, insc_month)[1]
+#                 remaining_days = days_in_month - insc_date.day + 1
+#                 proportional_fee = Decimal(monthly_fee) * (Decimal(remaining_days) / Decimal(days_in_month))
+                
+#                 if payments_for_month.exists():
+#                     total_paid = sum(p.paid_amount for p in payments_for_month)
+#                     remaining_for_month = max(proportional_fee - total_paid, 0)
+#                     if remaining_for_month > 0:
+#                         months_unpaid.append(month_name)
+#                         total_unpaid += float(remaining_for_month)
+#                 else:
+#                     months_unpaid.append(month_name)
+#                     total_unpaid += float(proportional_fee)
+#             else:
+#                 # Mois après l'inscription
+#                 if payments_for_month.exists():
+#                     total_remaining_month = sum(p.remaining_amount for p in payments_for_month)
+#                     if total_remaining_month > 0:
+#                         months_unpaid.append(month_name)
+#                         total_unpaid += float(total_remaining_month)
+#                 else:
+#                     months_unpaid.append(month_name)
+#                     total_unpaid += float(monthly_fee)
+
+#         result.append({
+#             "id": student.id,
+#             "student_name": student.student_name,
+#             "branch_name": student.branche.nom,
+#             "class_name": student.classe.nom,
+#             "phone": student.agent.whatsapp_phone if student.agent and student.agent.whatsapp_phone else student.phone,
+#             "months_unpaid": ", ".join(months_unpaid),
+#             "unpaid_amount": total_unpaid,
+#             "date_inscription": student.date_inscription,
+#         })
+
+#     return Response(result)
+
+# @api_view(['GET'])
+# def unpaid_students(request):
+#     branch_id = request.GET.get('branch_id')
+#     class_id = request.GET.get('class_id')
+#     year_id = request.GET.get('year_id')
+
+#     students = Etudiant.objects.filter(is_inscrire=1, payment_nature='mensuel')
+
+#     if branch_id:
+#         students = students.filter(branche_id=branch_id)
+#     if class_id:
+#         students = students.filter(classe_id=class_id)
+
+#     # 🔹 Année académique OBLIGATOIRE ici
+#     if not year_id:
+#         return Response({"error": "year_id est obligatoire"}, status=400)
+
+#     try:
+#         academic_year = AcademicYear.objects.get(id=year_id)
+#     except AcademicYear.DoesNotExist:
+#         return Response({"error": "année académique non trouvée"}, status=404)
+
+#     today = date.today()
+#     result = []
+
+#     for student in students:
+#         payments = Paiement.objects.filter(
+#             etudiant=student,
+#             academic_year=academic_year
+#         )
+
+#         monthly_fee = Decimal(student.remaining or 0)
+#         total_unpaid = Decimal(0)
+#         months_unpaid = []
+
+#         # 🔹 Date de début réelle
+#         start_date = max(student.date_inscription, academic_year.start_date)
+#         end_date = min(today, academic_year.end_date)
+
+#         current = date(start_date.year, start_date.month, 1)
+
+#         while current <= end_date:
+#             month_number = current.month
+#             month_name = ARABIC_MONTHS[month_number - 1]
+
+#             payments_for_month = payments.filter(month=month_number)
+
+#             # 🔹 Mois d'inscription → proportionnel
+#             if (
+#                 current.year == student.date_inscription.year
+#                 and current.month == student.date_inscription.month
+#             ):
+#                 days_in_month = monthrange(current.year, current.month)[1]
+#                 remaining_days = days_in_month - student.date_inscription.day + 1
+#                 month_due = monthly_fee * Decimal(remaining_days) / Decimal(days_in_month)
+#             else:
+#                 month_due = monthly_fee
+
+#             month_paid = sum(Decimal(p.paid_amount) for p in payments_for_month)
+#             month_unpaid = month_due - month_paid
+
+#             if month_unpaid > 0:
+#                 months_unpaid.append(month_name)
+#                 total_unpaid += month_unpaid
+
+#             # 🔹 Mois suivant
+#             if current.month == 12:
+#                 current = date(current.year + 1, 1, 1)
+#             else:
+#                 current = date(current.year, current.month + 1, 1)
+
+#         if total_unpaid > 0:
+#             result.append({
+#                 "id": student.id,
+#                 "student_name": student.student_name,
+#                 "branch_name": student.branche.nom,
+#                 "class_name": student.classe.nom,
+#                 "phone": student.agent.whatsapp_phone if student.agent and student.agent.whatsapp_phone else student.phone,
+#                 "months_unpaid": ", ".join(months_unpaid),
+#                 "unpaid_amount": float(total_unpaid),
+#                 "date_inscription": student.date_inscription,
+#             })
+
+#     return Response(result)
+
 @api_view(['GET'])
 def unpaid_students(request):
     branch_id = request.GET.get('branch_id')
     class_id = request.GET.get('class_id')
+    year_id = request.GET.get('year_id')
 
-    students = Etudiant.objects.filter(is_inscrire=1, payment_nature='mensuel')
+    if not year_id:
+        return Response({"error": "year_id est obligatoire"}, status=400)
+
+    try:
+        academic_year = AcademicYear.objects.get(id=year_id)
+    except AcademicYear.DoesNotExist:
+        return Response({"error": "année académique non trouvée"}, status=404)
+
+    students = Etudiant.objects.filter(
+        is_inscrire=1,
+        payment_nature='mensuel'
+    )
 
     if branch_id:
         students = students.filter(branche_id=branch_id)
@@ -2002,81 +2171,245 @@ def unpaid_students(request):
         students = students.filter(classe_id=class_id)
 
     result = []
-    current_date = date.today()
-    current_month = current_date.month
-    current_year = current_date.year
+    today = date.today()
 
     for student in students:
-        payments = Paiement.objects.filter(etudiant=student)
-        monthly_fee = student.remaining
+        payments = Paiement.objects.filter(
+            etudiant=student,
+            academic_year=academic_year
+        )
 
-        total_unpaid = 0
+        total_unpaid = Decimal("0.00")
         months_unpaid = []
 
-        insc_date = student.date_inscription
-        insc_month = insc_date.month
-        insc_year = insc_date.year
+        start_date = max(student.date_inscription, academic_year.start_date)
+        end_date = min(today, academic_year.end_date)
 
-        # 🔹 Boucler uniquement jusqu’au mois courant
-        for month_number in range(insc_month, current_month + 1):
+        current = date(start_date.year, start_date.month, 1)
+
+        while current <= end_date:
+            month_number = current.month
             month_name = ARABIC_MONTHS[month_number - 1]
-            payments_for_month = payments.filter(month=month_number)
-            
-            if month_number == insc_month:
-                # Cas du mois d'inscription → frais proportionnels
-                days_in_month = monthrange(insc_year, insc_month)[1]
-                remaining_days = days_in_month - insc_date.day + 1
-                proportional_fee = Decimal(monthly_fee) * (Decimal(remaining_days) / Decimal(days_in_month))
-                
-                if payments_for_month.exists():
-                    total_paid = sum(p.paid_amount for p in payments_for_month)
-                    remaining_for_month = max(proportional_fee - total_paid, 0)
-                    if remaining_for_month > 0:
-                        months_unpaid.append(month_name)
-                        total_unpaid += float(remaining_for_month)
-                else:
-                    months_unpaid.append(month_name)
-                    total_unpaid += float(proportional_fee)
-            else:
-                # Mois après l'inscription
-                if payments_for_month.exists():
-                    total_remaining_month = sum(p.remaining_amount for p in payments_for_month)
-                    if total_remaining_month > 0:
-                        months_unpaid.append(month_name)
-                        total_unpaid += float(total_remaining_month)
-                else:
-                    months_unpaid.append(month_name)
-                    total_unpaid += float(monthly_fee)
 
-        result.append({
-            "id": student.id,
-            "student_name": student.student_name,
-            "branch_name": student.branche.nom,
-            "class_name": student.classe.nom,
-            "phone": student.agent.whatsapp_phone if student.agent and student.agent.whatsapp_phone else student.phone,
-            "months_unpaid": ", ".join(months_unpaid),
-            "unpaid_amount": total_unpaid,
-            "date_inscription": student.date_inscription,
-        })
+            payments_for_month = payments.filter(month=month_number)
+
+            # 🔑 S’IL Y A UN ENREGISTREMENT → ON FAIT CONFIANCE AU remaining_amount
+            if payments_for_month.exists():
+                month_remaining = sum(
+                    Decimal(p.remaining_amount or 0)
+                    for p in payments_for_month
+                )
+            else:
+                # Pas de paiement du tout → mois totalement impayé
+                month_remaining = Decimal(student.remaining or 0)
+
+            if month_remaining > 0:
+                months_unpaid.append(month_name)
+                total_unpaid += month_remaining
+
+            # mois suivant
+            if current.month == 12:
+                current = date(current.year + 1, 1, 1)
+            else:
+                current = date(current.year, current.month + 1, 1)
+
+        if total_unpaid > 0:
+            result.append({
+                "id": student.id,
+                "student_name": student.student_name,
+                "branch_name": student.branche.nom,
+                "class_name": student.classe.nom,
+                "phone": student.agent.whatsapp_phone if student.agent and student.agent.whatsapp_phone else student.phone,
+                "months_unpaid": ", ".join(months_unpaid),
+                "unpaid_amount": float(total_unpaid),
+                "date_inscription": student.date_inscription,
+            })
 
     return Response(result)
 
 
 
+# @api_view(['GET'])
+# def class_payment_stats(request):
+#     branch_id = request.GET.get('branch_id')
+#     month = request.GET.get('month')  # optionnel : filtrer sur un mois précis
+
+#     students = Etudiant.objects.filter(is_inscrire=1)
+#     if branch_id:
+#         students = students.filter(branche_id=branch_id)
+
+#     current_date = date.today()
+#     current_month = int(month) if month else current_date.month
+#     current_year = current_date.year
+
+#     # Dictionnaire pour regrouper les stats par classe
+#     class_stats = defaultdict(lambda: {
+#         "class_name": "",
+#         "total_students": 0,
+#         "total_due": 0.0,
+#         "total_paid": 0.0,
+#         "total_unpaid": 0.0,
+#     })
+
+#     for student in students:
+#         if not student.classe:
+#             continue
+
+#         classe_name = student.classe.nom
+#         monthly_fee = student.remaining
+#         payments = Paiement.objects.filter(etudiant=student)
+
+#         total_due = 0
+#         total_paid = 0
+#         total_unpaid = 0
+
+#         insc_date = student.date_inscription
+#         insc_month = insc_date.month
+#         insc_year = insc_date.year
+
+#         # 🔹 Calculer seulement jusqu'au mois courant
+#         for month_number in range(insc_month, current_month + 1):
+#             payments_for_month = payments.filter(month=month_number)
+
+#             # Si c’est le mois d’inscription → proportionnel
+#             if month_number == insc_month:
+#                 days_in_month = monthrange(insc_year, insc_month)[1]
+#                 remaining_days = days_in_month - insc_date.day + 1
+#                 proportional_fee = Decimal(monthly_fee) * (Decimal(remaining_days) / Decimal(days_in_month))
+#                 month_due = proportional_fee
+#             else:
+#                 month_due = Decimal(monthly_fee)
+
+#             month_paid = sum(Decimal(p.paid_amount) for p in payments_for_month)
+#             month_unpaid = max(month_due - month_paid, 0)
+
+#             total_due += float(month_due)
+#             total_paid += float(month_paid)
+#             total_unpaid += float(month_unpaid)
+
+#         # 🔹 Mise à jour des stats globales par classe
+#         stats = class_stats[classe_name]
+#         stats["class_name"] = classe_name
+#         stats["total_students"] += 1
+#         stats["total_due"] += total_due
+#         stats["total_paid"] += total_paid
+#         stats["total_unpaid"] += total_unpaid
+
+#     # Transformer le dictionnaire en liste
+#     result = list(class_stats.values())
+
+#     return Response(result)
+
+
+# @api_view(['GET'])CUMILE 
+# def class_payment_stats(request):
+#     branch_id = request.GET.get('branch_id')
+#     month = request.GET.get('month')  # optionnel
+#     year_id = request.GET.get('year_id')  # 🔹 nouvel argument
+
+#     students = Etudiant.objects.filter(is_inscrire=1)
+#     if branch_id:
+#         students = students.filter(branche_id=branch_id)
+
+#     today = date.today()
+#     target_month = int(month) if month else today.month
+
+#     # Si year_id fourni → récupérer AcademicYear
+#     if year_id:
+#         try:
+#             academic_year = AcademicYear.objects.get(id=year_id)
+#         except AcademicYear.DoesNotExist:
+#             return Response({"error": "année académique non trouvée"}, status=404)
+#     else:
+#         academic_year = None
+
+#     class_stats = defaultdict(lambda: {
+#         "class_name": "",
+#         "total_students": 0,
+#         "total_due": 0.0,
+#         "total_paid": 0.0,
+#         "total_unpaid": 0.0,
+#     })
+
+#     for student in students:
+#         if not student.classe:
+#             continue
+
+#         classe_name = student.classe.nom
+#         monthly_fee = Decimal(student.remaining or 0)
+#         payments = Paiement.objects.filter(etudiant=student)
+
+#         total_due = Decimal(0)
+#         total_paid = Decimal(0)
+#         total_unpaid = Decimal(0)
+
+#         current = date(student.date_inscription.year, student.date_inscription.month, 1)
+#         end_date = date(today.year, target_month, 1)
+
+#         while current <= end_date:
+#             # 🔹 Filtrer les paiements par année académique si fournie
+#             if academic_year:
+#                 payments_for_month = payments.filter(month=current.month, academic_year=academic_year)
+#             else:
+#                 year_obj = AcademicYear.objects.filter(
+#                     start_date__lte=current,
+#                     end_date__gte=current
+#                 ).first()
+#                 payments_for_month = payments.filter(month=current.month, academic_year=year_obj) if year_obj else payments.filter(month=current.month)
+
+#             # Frais proportionnels pour le mois d'inscription
+#             if current.year == student.date_inscription.year and current.month == student.date_inscription.month:
+#                 days_in_month = monthrange(current.year, current.month)[1]
+#                 remaining_days = days_in_month - student.date_inscription.day + 1
+#                 month_due = monthly_fee * Decimal(remaining_days) / Decimal(days_in_month)
+#             else:
+#                 month_due = monthly_fee
+
+#             month_paid = sum(Decimal(p.paid_amount) for p in payments_for_month)
+#             month_unpaid = max(month_due - month_paid, Decimal(0))
+
+#             total_due += month_due
+#             total_paid += month_paid
+#             total_unpaid += month_unpaid
+
+#             # Passer au mois suivant
+#             if current.month == 12:
+#                 current = date(current.year + 1, 1, 1)
+#             else:
+#                 current = date(current.year, current.month + 1, 1)
+
+#         stats = class_stats[classe_name]
+#         stats["class_name"] = classe_name
+#         stats["total_students"] += 1
+#         stats["total_due"] += float(total_due)
+#         stats["total_paid"] += float(total_paid)
+#         stats["total_unpaid"] += float(total_unpaid)
+
+#     return Response(list(class_stats.values()))
+
 @api_view(['GET'])
 def class_payment_stats(request):
     branch_id = request.GET.get('branch_id')
-    month = request.GET.get('month')  # optionnel : filtrer sur un mois précis
+    month = request.GET.get('month')  # obligatoire pour ton cas
+    year_id = request.GET.get('year_id')
+
+    if not month:
+        return Response({"error": "month est obligatoire"}, status=400)
+    today = date.today()
+    target_month = int(month) if month else today.month
 
     students = Etudiant.objects.filter(is_inscrire=1)
     if branch_id:
         students = students.filter(branche_id=branch_id)
 
-    current_date = date.today()
-    current_month = int(month) if month else current_date.month
-    current_year = current_date.year
+    if year_id:
+        try:
+            academic_year = AcademicYear.objects.get(id=year_id)
+        except AcademicYear.DoesNotExist:
+            return Response({"error": "année académique non trouvée"}, status=404)
+    else:
+        academic_year = None
 
-    # Dictionnaire pour regrouper les stats par classe
     class_stats = defaultdict(lambda: {
         "class_name": "",
         "total_students": 0,
@@ -2090,49 +2423,47 @@ def class_payment_stats(request):
             continue
 
         classe_name = student.classe.nom
-        monthly_fee = student.remaining
-        payments = Paiement.objects.filter(etudiant=student)
+        monthly_fee = Decimal(student.remaining or 0)
 
-        total_due = 0
-        total_paid = 0
-        total_unpaid = 0
+        payments = Paiement.objects.filter(
+            etudiant=student,
+            month=target_month
+        )
 
-        insc_date = student.date_inscription
-        insc_month = insc_date.month
-        insc_year = insc_date.year
+        if academic_year:
+            payments = payments.filter(academic_year=academic_year)
 
-        # 🔹 Calculer seulement jusqu'au mois courant
-        for month_number in range(insc_month, current_month + 1):
-            payments_for_month = payments.filter(month=month_number)
+        # 🔹 Calcul du montant dû pour CE MOIS SEULEMENT
+        if (
+            student.date_inscription.month == target_month and
+            student.date_inscription.year == (academic_year.start_date.year if academic_year else student.date_inscription.year)
+        ):
+            days_in_month = monthrange(student.date_inscription.year, target_month)[1]
+            remaining_days = days_in_month - student.date_inscription.day + 1
+            month_due = monthly_fee * Decimal(remaining_days) / Decimal(days_in_month)
+        else:
+            month_due = monthly_fee
 
-            # Si c’est le mois d’inscription → proportionnel
-            if month_number == insc_month:
-                days_in_month = monthrange(insc_year, insc_month)[1]
-                remaining_days = days_in_month - insc_date.day + 1
-                proportional_fee = Decimal(monthly_fee) * (Decimal(remaining_days) / Decimal(days_in_month))
-                month_due = proportional_fee
-            else:
-                month_due = Decimal(monthly_fee)
+        if payments.exists():
+            # 🔥 SOURCE DE VÉRITÉ
+            month_remaining = sum(
+                Decimal(p.remaining_amount or 0)
+                for p in payments
+            )
+            month_unpaid = max(month_remaining, Decimal(0))
+            month_paid = month_due - month_unpaid
+        else:
+            month_unpaid = month_due
+            month_paid = Decimal(0)
 
-            month_paid = sum(Decimal(p.paid_amount) for p in payments_for_month)
-            month_unpaid = max(month_due - month_paid, 0)
-
-            total_due += float(month_due)
-            total_paid += float(month_paid)
-            total_unpaid += float(month_unpaid)
-
-        # 🔹 Mise à jour des stats globales par classe
         stats = class_stats[classe_name]
         stats["class_name"] = classe_name
         stats["total_students"] += 1
-        stats["total_due"] += total_due
-        stats["total_paid"] += total_paid
-        stats["total_unpaid"] += total_unpaid
+        stats["total_due"] += float(month_due)
+        stats["total_paid"] += float(month_paid)
+        stats["total_unpaid"] += float(month_unpaid)
 
-    # Transformer le dictionnaire en liste
-    result = list(class_stats.values())
-
-    return Response(result)
+    return Response(list(class_stats.values()))
 
 
 from .serializers import SuspensionSerializer
