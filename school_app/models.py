@@ -370,7 +370,7 @@ class BankAccount(models.Model):
     bank_name = models.CharField(max_length=100)
     account_number = models.CharField(max_length=100)
     balance = models.DecimalField(max_digits=13, decimal_places=2, default=0)
-    category = models.CharField(choices=CATEGORY, null=True, blank=True)
+    category = models.CharField(choices=CATEGORY, null=True, blank=True, default=1)
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name='bank_accounts')
     
     def __str__(self):

@@ -31,6 +31,7 @@ from django.db.models.signals import post_save, pre_save, post_delete
 from .pagination import EtudiantPagination
 from rest_framework import filters
 from django.db import transaction as db_transaction
+from .filters import UtilisateurFilter
 
 
 MONTHS_AR = {
@@ -1221,6 +1222,8 @@ class MonthlyReportViewSet(viewsets.ModelViewSet):
 class UtilisateurViewSet(viewsets.ModelViewSet):
     queryset = Utilisateur.objects.all()
     serializer_class = UtilisateurSerializer
+    filter_backends = [DjangoFilterBackend]
+    filterset_class = UtilisateurFilter
 
     @action(detail=True, methods=['post'], url_path='change-password')
     def change_password(self, request, pk=None):
@@ -1270,7 +1273,6 @@ class RegisterUserView(generics.CreateAPIView):
     permission_classes = [AllowAny]
 
 
-
 class BankTransferView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -1316,7 +1318,6 @@ class BankTransferView(APIView):
             "from": source.id,
             "to": destination.id
         })
-
 
 
 @api_view(['GET'])
@@ -1900,22 +1901,22 @@ def filter_transactions(request):
     serializer = TransactionSerializer(transactions, many=True)
 
     # ---- Totaux période ----
-    total_plus_bank = transactions.filter(type="plus").exclude(bank_id=1).aggregate(s=Sum("paid_amount"))["s"] or 0
-    total_minus_bank = transactions.filter(type="minus").exclude(bank_id=1).aggregate(s=Sum("paid_amount"))["s"] or 0
+    total_plus_bank = transactions.filter(type="plus").exclude(bank__category=1).aggregate(s=Sum("paid_amount"))["s"] or 0
+    total_minus_bank = transactions.filter(type="minus").exclude(bank__category=1).aggregate(s=Sum("paid_amount"))["s"] or 0
 
-    total_plus_fund = transactions.filter(type="plus", bank_id=1).aggregate(s=Sum("paid_amount"))["s"] or 0
-    total_minus_fund = transactions.filter(type="minus", bank_id=1).aggregate(s=Sum("paid_amount"))["s"] or 0
+    total_plus_fund = transactions.filter(type="plus", bank__category=1).aggregate(s=Sum("paid_amount"))["s"] or 0
+    total_minus_fund = transactions.filter(type="minus", bank__category=1).aggregate(s=Sum("paid_amount"))["s"] or 0
 
     # ---- Solde avant start_date ----
     before_tx = Transaction.objects.filter(date__date__lt=start_date)
     if user_id:
         before_tx = before_tx.filter(user_id=user_id)
 
-    before_plus_bank = before_tx.filter(type="plus").exclude(bank_id=1).aggregate(s=Sum("paid_amount"))["s"] or 0
-    before_minus_bank = before_tx.filter(type="minus").exclude(bank_id=1).aggregate(s=Sum("paid_amount"))["s"] or 0
+    before_plus_bank = before_tx.filter(type="plus").exclude(bank__category=1).aggregate(s=Sum("paid_amount"))["s"] or 0
+    before_minus_bank = before_tx.filter(type="minus").exclude(bank__category=1).aggregate(s=Sum("paid_amount"))["s"] or 0
 
-    before_plus_fund = before_tx.filter(type="plus", bank_id=1).aggregate(s=Sum("paid_amount"))["s"] or 0
-    before_minus_fund = before_tx.filter(type="minus", bank_id=1).aggregate(s=Sum("paid_amount"))["s"] or 0
+    before_plus_fund = before_tx.filter(type="plus", bank__category=1).aggregate(s=Sum("paid_amount"))["s"] or 0
+    before_minus_fund = before_tx.filter(type="minus", bank__category=1).aggregate(s=Sum("paid_amount"))["s"] or 0
 
     return Response({
         "transactions": serializer.data,
@@ -2134,12 +2135,11 @@ def class_payment_stats(request):
     return Response(result)
 
 
+from .serializers import SuspensionSerializer
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def create_suspension(request):
-    print("METHOD =", request.method)
-    return Response({"ok": True})
     """
     Create a suspension record with unpaid months data
     Expected POST data:
@@ -2204,7 +2204,6 @@ def create_suspension(request):
             student.save()
         
         # Serialize and return response
-        from .serializers import SuspensionSerializer
         serializer = SuspensionSerializer(suspension)
         
         return Response({
