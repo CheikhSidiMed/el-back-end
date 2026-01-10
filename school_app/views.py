@@ -2220,7 +2220,7 @@ def class_payment_stats(request):
     today = date.today()
     target_month = int(month) if month else today.month
 
-    students = Etudiant.objects.filter(is_inscrire=1)
+    students = Etudiant.objects.filter(is_inscrire=1, payment_nature='mensuel', etat='inscrit')
     if branch_id:
         students = students.filter(branche_id=branch_id)
 

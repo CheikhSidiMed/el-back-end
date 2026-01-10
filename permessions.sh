@@ -188,4 +188,4 @@ Etudiant.objects.filter( gender='M',date_inscription=target_date).update(gender=
 # Étape 3 : TMP → M
 Etudiant.objects.filter( gender='TMP',  date_inscription=target_date).update(gender='M')
 
-python manage.py fix_students_payment 
+python manage.py fix_gender 
