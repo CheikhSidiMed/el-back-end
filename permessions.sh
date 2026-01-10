@@ -168,18 +168,24 @@ python manage.py createsuperuser
 python manage.py shell
 
 from datetime import date
-from app.models import Etudiant   # replace app with your app name
+from school_app.models import Etudiant   # replace app with your app name
 
 target_date = date(2025, 12, 31)
 
 # F → M
-Etudiant.objects.filter(
-    gender='F',
-    date_inscription=target_date
-).update(gender='M')
+Etudiant.objects.filter(gender='F', date_inscription=target_date).update(gender='M')
 
 # M → F
-Etudiant.objects.filter(
-    gender='M',
-    date_inscription=target_date
-).update(gender='F')
+Etudiant.objects.filter( gender='M', date_inscription=target_date ).update(gender='F')
+
+
+# Étape 1 : marquer les F
+Etudiant.objects.filter( gender='F', date_inscription=target_date).update(gender='TMP')
+
+# Étape 2 : M → F
+Etudiant.objects.filter( gender='M',date_inscription=target_date).update(gender='F')
+
+# Étape 3 : TMP → M
+Etudiant.objects.filter( gender='TMP',  date_inscription=target_date).update(gender='M')
+
+python manage.py fix_students_payment 
