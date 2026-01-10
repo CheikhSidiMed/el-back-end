@@ -163,3 +163,23 @@ print("✅ All permissions inserted successfully")
 python manage.py createsuperuser
 21212123 Adm212121
 21212122 Adm212121 local
+
+
+python manage.py shell
+
+from datetime import date
+from app.models import Etudiant   # replace app with your app name
+
+target_date = date(2025, 12, 31)
+
+# F → M
+Etudiant.objects.filter(
+    gender='F',
+    date_inscription=target_date
+).update(gender='M')
+
+# M → F
+Etudiant.objects.filter(
+    gender='M',
+    date_inscription=target_date
+).update(gender='F')

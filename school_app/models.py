@@ -238,6 +238,7 @@ class Activity(models.Model):
 
 class AcademicYear(models.Model):
     year        = models.CharField(max_length=9, unique=True, help_text="ex: 2024-2025")
+    name        = models.CharField(max_length=9, default='2025', help_text="2025")
     start_date  = models.DateField()
     end_date    = models.DateField()
 
@@ -388,8 +389,6 @@ class Paiement(models.Model):
     bank = models.ForeignKey(BankAccount, on_delete=models.SET_NULL, null=True, blank=True)
     agent = models.ForeignKey(Agent, on_delete=models.SET_NULL, null=True, blank=True)
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True)
-
-    
 
     def __str__(self):
         return f"{self.etudiant.student_name} - Mois: {self.month} - {self.academic_year.year}"

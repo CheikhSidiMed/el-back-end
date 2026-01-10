@@ -18,22 +18,6 @@ class AbsElmhdaraSerializer(serializers.ModelSerializer):
         model = AbsElmhdara
         fields = '__all__'
 
-class ClasseSerializer(serializers.ModelSerializer):
-    # → visible UNIQUEMENT dans la réponse (GET)
-    branche = BrancheSerializer(read_only=True)
-
-    # → utilisé UNIQUEMENT à la création / mise à jour (POST / PATCH)
-    branche_id = serializers.PrimaryKeyRelatedField(
-        source='branche',                 # fait le lien avec le FK `branche`
-        queryset=Branche.objects.all(),
-        write_only=True
-    )
-
-    class Meta:
-        model = Classe
-        fields = ['id', 'nom', 'niveau', 'branche', 'branche_id']
-
-
 class NiveauSerializer(serializers.ModelSerializer):
     class Meta:
         model = Niveau
@@ -54,6 +38,48 @@ class ActivitySerializer(serializers.ModelSerializer):
     class Meta:
         model = Activity
         fields = '__all__'
+
+
+class EmployeeSerializer(serializers.ModelSerializer):
+    branche = BrancheSerializer(read_only=True)
+    branche_id = serializers.PrimaryKeyRelatedField(
+        queryset=Branche.objects.all(), source='branche', write_only=True, required=False, allow_null=True
+    )
+
+    class Meta:
+        model = Employee
+        fields = '__all__'
+
+    def create(self, validated_data):
+        employee = super().create(validated_data)
+
+        Utilisateur.objects.create(
+            phone=employee.phone,
+            role=employee.job,  # associer au job comme role
+            first_name=employee.full_name,  # pour cohérence
+            password=employee.phone  # mot de passe par défaut
+        )
+
+        return employee
+
+
+class ClasseSerializer(serializers.ModelSerializer):
+    employees = EmployeeSerializer(many=True, read_only=True)  # relation reverse
+
+    # → visible UNIQUEMENT dans la réponse (GET)
+    branche = BrancheSerializer(read_only=True)
+
+    # → utilisé UNIQUEMENT à la création / mise à jour (POST / PATCH)
+    branche_id = serializers.PrimaryKeyRelatedField(
+        source='branche',                 # fait le lien avec le FK `branche`
+        queryset=Branche.objects.all(),
+        write_only=True
+    )
+
+    class Meta:
+        model = Classe
+        fields = ['id', 'nom', 'niveau', 'branche', 'branche_id', 'employees']
+
 
 class EtudiantSerializer(serializers.ModelSerializer):
     level = NiveauSerializer(read_only=True)
@@ -128,28 +154,6 @@ class AccountSerializer(serializers.ModelSerializer):
     class Meta:
         model = Account
         fields = '__all__'
-
-class EmployeeSerializer(serializers.ModelSerializer):
-    branche = BrancheSerializer(read_only=True)
-    branche_id = serializers.PrimaryKeyRelatedField(
-        queryset=Branche.objects.all(), source='branche', write_only=True, required=False, allow_null=True
-    )
-
-    class Meta:
-        model = Employee
-        fields = '__all__'
-
-    def create(self, validated_data):
-        employee = super().create(validated_data)
-
-        Utilisateur.objects.create(
-            phone=employee.phone,
-            role=employee.job,  # associer au job comme role
-            first_name=employee.full_name,  # pour cohérence
-            password=employee.phone  # mot de passe par défaut
-        )
-
-        return employee
 
 class SalaryPaymentSerializer(serializers.ModelSerializer):
 
@@ -488,7 +492,7 @@ class MyTokenObtainPairSerializer(TokenObtainPairSerializer):
 class AcademicYearSerializer(serializers.ModelSerializer):
     class Meta:
         model  = AcademicYear
-        fields = ("id", "year", "start_date", "end_date")
+        fields = ("id", "year", "name", "start_date", "end_date")
 
 
 class PaiementSerializer(serializers.ModelSerializer):
@@ -551,3 +555,7 @@ class SuspensionSerializer(serializers.ModelSerializer):
             'notes',
         ]
         read_only_fields = ['created_at', 'created_by']
+
+class ReactivateSuspensionSerializer(serializers.Serializer):
+    reactivation_reason = serializers.CharField(required=False, allow_blank=True)
+

@@ -49,6 +49,10 @@ MONTHS_AR = {
     12: "ديسمبر",
 }
 
+ARABIC_MONTHS = [
+    "يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو",
+    "يوليو", "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر"
+]
 
 class BrancheViewSet(viewsets.ModelViewSet):
     serializer_class = BrancheSerializer
@@ -685,10 +689,6 @@ class PaiementViewSet(viewsets.ModelViewSet):
                 if bank and hasattr(bank, "balance"):
                     bank.balance = Decimal(bank.balance) - Decimal(paid_amount)
                     bank.save()
-                ARABIC_MONTHS = [
-                    "يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو",
-                    "يوليو", "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر"
-                ]
                 # 🔹 Créer une description lisible en arabe
                 month_name_ar = paiement.month_name if hasattr(paiement, "get_month_display") else ARABIC_MONTHS[int(paiement.month) - 1]
                 description = f"تم حذف دفعة الطالب(ة) {student.student_name} لشهر {month_name_ar} بمبلغ {paid_amount}."
@@ -742,6 +742,7 @@ class GarantPaiementViewSet(viewsets.ModelViewSet):
         payments = data.get("payments")
         bank_id = data.get("bank")
         garant_id = data.get("garant")
+        account_id = data.get("account")
 
         if not payments or not garant_id:
             return Response({"error": "Missing data"}, status=400)
@@ -770,6 +771,7 @@ class GarantPaiementViewSet(viewsets.ModelViewSet):
             receipt = Receipt.objects.create(
                 garant=garant,
                 agent_id=None,
+                account_id=account_id,
                 total_amount=total_paid,
                 receipt_date=timezone.now(),
                 created_by=request.user,
@@ -784,6 +786,7 @@ class GarantPaiementViewSet(viewsets.ModelViewSet):
                 garant=garant,
                 agent_id=None,
                 # month=", ".join(months),
+                account_id=account_id,
                 description=f"الكافل(ة) {garant.name} سدد(ت) الأشهر: {{ {', '.join(months_names)} }}",
                 due_amount=total_due,
                 paid_amount=total_paid,
@@ -821,14 +824,6 @@ class GarantPaiementViewSet(viewsets.ModelViewSet):
                 gp.user = request.user
                 gp.save()
 
-        # return Response({
-        #     "message": "Paiement combiné avec succès",
-        #     "receipt_id": receipt.pk,
-        #     "transaction_id": txn.pk,
-        #     "months": txn.month,
-        #     "paid_amount": total_paid,
-        #     "remaining_amount": remaining_amount,
-        # })
         return Response({
             "message": "Paiement traité avec succès",
             "receipt_id": receipt.pk,
@@ -837,6 +832,14 @@ class GarantPaiementViewSet(viewsets.ModelViewSet):
             "created_by": request.user.first_name,
         })
 
+        # return Response({
+        #     "message": "Paiement combiné avec succès",
+        #     "receipt_id": receipt.pk,
+        #     "transaction_id": txn.pk,
+        #     "months": txn.month,
+        #     "paid_amount": total_paid,
+        #     "remaining_amount": remaining_amount,
+        # })
 
     # @action(detail=False, methods=['post'])
     # def process_payment(self, request):
@@ -1341,81 +1344,81 @@ def daily_absence_list(request):
 
 
 
+
 # @api_view(['GET'])
 # def student_payments(request):
 #     student_id = request.GET.get('student_id')
 #     year_id = request.GET.get('academic_year')
 #     full_month_fee = request.GET.get('month_fee')
 
-#     # Convert month_fee to Decimal
 #     try:
-#         full_month_fee = Decimal(full_month_fee) if full_month_fee else Decimal("0")
+#         full_month_fee = Decimal(full_month_fee)
 #     except:
-#         return Response({"error": "Invalid month_fee value"}, status=400)
+#         return Response({"error": "Invalid month_fee"}, status=400)
 
-#     # Arabic month names
-#     arabic_months = [
-#         'يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو',
-#         'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'
-#     ]
-
-#     # Validate student + year
 #     try:
 #         student = Etudiant.objects.get(id=student_id)
 #         academic_year = AcademicYear.objects.get(id=year_id)
-#     except (Etudiant.DoesNotExist, AcademicYear.DoesNotExist):
+#     except:
 #         return Response({"error": "Invalid student or academic year"}, status=400)
 
-#     registration_month = student.date_inscription.month
-#     registration_day = student.date_inscription.day
-
-#     # Get all recorded payments
+#     # 🔑 Paiements existants
 #     payments = Paiement.objects.filter(
 #         etudiant=student,
 #         academic_year=academic_year
-#     ).values('month', 'due_amount', 'paid_amount', 'remaining_amount')
+#     ).values('month', 'paid_amount', 'remaining_amount')
 
 #     payments_dict = {p['month']: p for p in payments}
 
+#     # 🔑 Calcul de l’inscription
+#     academic_year_start = academic_year.start_date.year
+#     academic_year_end = academic_year.end_date.year
+#     same_year = academic_year_start <= student.date_inscription.year <= academic_year_end
+#     registration_month = student.date_inscription.month
+#     registration_day = student.date_inscription.day
+
 #     result = []
-#     for month in range(1, 12 + 1):
-#         if month < registration_month:
-#             # Before registration month => considered paid
-#             status = "paid"
-#             status_bool = True
+
+#     for month in range(1, 13):
+#         # 🔹 Paiement normal
+#         payment = payments_dict.get(month)
+
+#         # CAS 1 : inscription même année et mois avant inscription
+#         if same_year and month < registration_month:
 #             due_amount = Decimal("0.00")
 #             paid_amount = Decimal("0.00")
 #             remaining_amount = Decimal("0.00")
+#             status, status_bool = "paid", True
 
-#         elif month == registration_month:
-#             # Prorated month
-#             days_in_month = monthrange(student.date_inscription.year, month)[1]
+#         # CAS 2 : mois d’inscription
+#         elif same_year and month == registration_month:
+#             days_in_month = monthrange(academic_year_start, month)[1]
 #             proportion = Decimal(days_in_month - registration_day + 1) / Decimal(days_in_month)
 #             due_amount = (full_month_fee * proportion).quantize(Decimal("0.01"))
 
-#             payment = payments_dict.get(month)
 #             if payment:
 #                 paid_amount = payment['paid_amount']
 #                 remaining_amount = due_amount - paid_amount
-
-#                 if remaining_amount <= 0:
-#                     status, status_bool = "paid", True
-#                 elif paid_amount > 0:
-#                     status, status_bool = "partial", False
-#                 else:
-#                     status, status_bool = "unpaid", False
 #             else:
 #                 paid_amount = Decimal("0.00")
 #                 remaining_amount = due_amount
+
+#             if remaining_amount <= 0:
+#                 status, status_bool = "paid", True
+#             elif paid_amount > 0:
+#                 status, status_bool = "partial", False
+#             else:
 #                 status, status_bool = "unpaid", False
 
+#         # CAS 3 : mois normaux
 #         else:
-#             # Normal month
-#             due_amount = full_month_fee
-#             payment = payments_dict.get(month)
-#             if payment:
-#                 paid_amount = payment['paid_amount']
-#                 remaining_amount = due_amount - paid_amount
+#                 due_amount = full_month_fee
+#                 if payment:
+#                     paid_amount = payment['paid_amount']
+#                     remaining_amount = payment['remaining_amount'] if payment.get('remaining_amount') is not None else due_amount - paid_amount
+#                 else:
+#                     paid_amount = Decimal("0.00")
+#                     remaining_amount = due_amount
 
 #                 if remaining_amount <= 0:
 #                     status, status_bool = "paid", True
@@ -1423,22 +1426,19 @@ def daily_absence_list(request):
 #                     status, status_bool = "partial", False
 #                 else:
 #                     status, status_bool = "unpaid", False
-#             else:
-#                 paid_amount = Decimal("0.00")
-#                 remaining_amount = due_amount
-#                 status, status_bool = "unpaid", False
 
 #         result.append({
 #             "month": month,
-#             "month_name_ar": arabic_months[month - 1],
+#             "month_name_ar": ARABIC_MONTHS[month - 1],
 #             "status": status,
 #             "status_bool": status_bool,
-#             "due_amount": float(due_amount),       # convert to float for JSON
+#             "due_amount": float(due_amount),
 #             "paid_amount": float(paid_amount),
 #             "remaining_amount": float(remaining_amount)
 #         })
 
 #     return Response(result)
+
 
 
 @api_view(['GET'])
@@ -1447,61 +1447,67 @@ def student_payments(request):
     year_id = request.GET.get('academic_year')
     full_month_fee = request.GET.get('month_fee')
 
+    # Vérifier le montant mensuel
     try:
         full_month_fee = Decimal(full_month_fee)
     except:
         return Response({"error": "Invalid month_fee"}, status=400)
 
-    arabic_months = [
-        'يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو',
-        'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'
-    ]
-
+    # Récupérer l'étudiant et l'année académique
     try:
         student = Etudiant.objects.get(id=student_id)
         academic_year = AcademicYear.objects.get(id=year_id)
     except:
         return Response({"error": "Invalid student or academic year"}, status=400)
 
+    # Paiements existants
     payments = Paiement.objects.filter(
         etudiant=student,
         academic_year=academic_year
-    ).values('month', 'paid_amount')
-
+    ).values('month', 'paid_amount', 'remaining_amount')
     payments_dict = {p['month']: p for p in payments}
 
-    # 🔑 règle clé
-    # same_year = student.date_inscription.year == academic_year.year
-    academic_year_start = academic_year.start_date.year
-    academic_year_end = academic_year.end_date.year
-
-    same_year = academic_year_start <= student.date_inscription.year <= academic_year_end
-
-    registration_month = student.date_inscription.month
-    registration_day = student.date_inscription.day
+    registration_date = student.date_inscription
+    registration_year = registration_date.year
+    year_selected = int(academic_year.name)  # <-- Utilisation de name
 
     result = []
 
     for month in range(1, 13):
+        payment = payments_dict.get(month)
 
-        # ============================
-        # CAS 1 : inscription même année
-        # ============================
-        if same_year and month < registration_month:
-            due_amount = Decimal("0.00")
-            paid_amount = Decimal("0.00")
-            remaining_amount = Decimal("0.00")
-            status, status_bool = "paid", True
-
-        elif same_year and month == registration_month:
-            days_in_month = monthrange(academic_year_start, month)[1]
-            proportion = Decimal(days_in_month - registration_day + 1) / Decimal(days_in_month)
-            due_amount = (full_month_fee * proportion).quantize(Decimal("0.01"))
-
-            payment = payments_dict.get(month)
+        # ---------------------------
+        # Année sélectionnée avant inscription
+        # ---------------------------
+        if year_selected < registration_year:
             if payment:
-                paid_amount = payment['paid_amount']
-                remaining_amount = due_amount - paid_amount
+                remaining_amount = Decimal(payment['remaining_amount'])
+                due_amount = Decimal(payment['paid_amount']) + remaining_amount
+                paid_amount = Decimal(payment['paid_amount'])
+                status, status_bool = ("unpaid", False) if remaining_amount > 0 else ("paid", True)
+            else:
+                # Pas de paiement → considérer payé car étudiant pas encore inscrit
+                due_amount = paid_amount = remaining_amount = Decimal("0.00")
+                status, status_bool = "paid", True
+
+        # ---------------------------
+        # Année sélectionnée = année d'inscription
+        # ---------------------------
+        elif year_selected == registration_year:
+            if month < registration_date.month:
+                due_amount = paid_amount = remaining_amount = Decimal("0.00")
+                status, status_bool = "paid", True
+            elif month == registration_date.month:
+                days_in_month = monthrange(registration_year, month)[1]
+                proportion = Decimal(days_in_month - registration_date.day + 1) / Decimal(days_in_month)
+                due_amount = (full_month_fee * proportion).quantize(Decimal("0.01"))
+
+                if payment:
+                    paid_amount = Decimal(payment['paid_amount'])
+                    remaining_amount = due_amount - paid_amount
+                else:
+                    paid_amount = Decimal("0.00")
+                    remaining_amount = due_amount
 
                 if remaining_amount <= 0:
                     status, status_bool = "paid", True
@@ -1510,35 +1516,43 @@ def student_payments(request):
                 else:
                     status, status_bool = "unpaid", False
             else:
-                paid_amount = Decimal("0.00")
-                remaining_amount = due_amount
-                status, status_bool = "unpaid", False
+                due_amount = full_month_fee
+                if payment:
+                    paid_amount = Decimal(payment['paid_amount'])
+                    remaining_amount = Decimal(payment['remaining_amount']) if payment.get('remaining_amount') is not None else due_amount - paid_amount
+                else:
+                    paid_amount = Decimal("0.00")
+                    remaining_amount = due_amount
 
-        # ============================
-        # CAS 2 : année passée OU mois normaux
-        # ============================
+                if remaining_amount <= 0:
+                    status, status_bool = "paid", True
+                elif paid_amount > 0:
+                    status, status_bool = "partial", False
+                else:
+                    status, status_bool = "unpaid", False
+
+        # ---------------------------
+        # Année sélectionnée après inscription
+        # ---------------------------
         else:
             due_amount = full_month_fee
-            payment = payments_dict.get(month)
-
             if payment:
-                paid_amount = payment['paid_amount']
-                remaining_amount = due_amount - paid_amount
-
-                if remaining_amount <= 0:
-                    status, status_bool = "paid", True
-                elif paid_amount > 0:
-                    status, status_bool = "partial", False
-                else:
-                    status, status_bool = "unpaid", False
+                paid_amount = Decimal(payment['paid_amount'])
+                remaining_amount = Decimal(payment['remaining_amount']) if payment.get('remaining_amount') is not None else due_amount - paid_amount
             else:
                 paid_amount = Decimal("0.00")
                 remaining_amount = due_amount
+
+            if remaining_amount <= 0:
+                status, status_bool = "paid", True
+            elif paid_amount > 0:
+                status, status_bool = "partial", False
+            else:
                 status, status_bool = "unpaid", False
 
         result.append({
             "month": month,
-            "month_name_ar": arabic_months[month - 1],
+            "month_name_ar": ARABIC_MONTHS[month - 1],
             "status": status,
             "status_bool": status_bool,
             "due_amount": float(due_amount),
@@ -1774,33 +1788,6 @@ def garant_payments(request):
     return Response(result)
 
 
-# @receiver(post_save, sender=Transaction)
-# def update_account_balance(sender, instance, created, **kwargs):
-#     if created and instance.bank:
-#         if instance.type == "plus":  # Crédit
-#             instance.bank.balance += instance.paid_amount
-#         elif instance.type == "minus":  # Débit
-#             instance.bank.balance -= instance.paid_amount
-#         instance.bank.save()
-#     if created and instance.account:
-#         if instance.type == "plus":  # Crédit
-#             instance.account.balance += instance.paid_amount
-#         elif instance.type == "minus":  # Débit
-#             instance.account.balance -= instance.paid_amount
-#         instance.account.save()
-#     if created and instance.employee:
-#         if instance.type == "plus":  # Crédit
-#             instance.employee.balance += instance.paid_amount
-#         elif instance.type == "minus":  # Débit
-#             instance.employee.balance -= instance.paid_amount
-#         instance.employee.save()
-#     if created and instance.inscription:
-#         if instance.type == "plus":  # Crédit
-#             instance.inscription.montant_pay += instance.paid_amount
-#         elif instance.type == "minus":  # Débit
-#             instance.inscription.montant_pay -= instance.paid_amount
-#         instance.inscription.save()
-
 # On sauvegarde l'ancien état avant la mise à jour
 @receiver(pre_save, sender=Transaction)
 def store_old_values(sender, instance, **kwargs):
@@ -1982,170 +1969,6 @@ def filter_transactions_account(request):
 
 
 
-# Tableau des mois en arabe
-ARABIC_MONTHS = [
-    "يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو",
-    "يوليو", "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر"
-]
-
-
-# @api_view(['GET'])
-# def unpaid_students(request):
-#     branch_id = request.GET.get('branch_id')
-#     class_id = request.GET.get('class_id')
-
-#     students = Etudiant.objects.filter(is_inscrire=1, payment_nature='mensuel')
-
-#     if branch_id:
-#         students = students.filter(branche_id=branch_id)
-#     if class_id:
-#         students = students.filter(classe_id=class_id)
-
-#     result = []
-#     current_date = date.today()
-#     current_month = current_date.month
-#     current_year = current_date.year
-
-#     for student in students:
-#         payments = Paiement.objects.filter(etudiant=student)
-#         monthly_fee = student.remaining
-
-#         total_unpaid = 0
-#         months_unpaid = []
-
-#         insc_date = student.date_inscription
-#         insc_month = insc_date.month
-#         insc_year = insc_date.year
-
-#         # 🔹 Boucler uniquement jusqu’au mois courant
-#         for month_number in range(insc_month, current_month + 1):
-#             month_name = ARABIC_MONTHS[month_number - 1]
-#             payments_for_month = payments.filter(month=month_number)
-            
-#             if month_number == insc_month:
-#                 # Cas du mois d'inscription → frais proportionnels
-#                 days_in_month = monthrange(insc_year, insc_month)[1]
-#                 remaining_days = days_in_month - insc_date.day + 1
-#                 proportional_fee = Decimal(monthly_fee) * (Decimal(remaining_days) / Decimal(days_in_month))
-                
-#                 if payments_for_month.exists():
-#                     total_paid = sum(p.paid_amount for p in payments_for_month)
-#                     remaining_for_month = max(proportional_fee - total_paid, 0)
-#                     if remaining_for_month > 0:
-#                         months_unpaid.append(month_name)
-#                         total_unpaid += float(remaining_for_month)
-#                 else:
-#                     months_unpaid.append(month_name)
-#                     total_unpaid += float(proportional_fee)
-#             else:
-#                 # Mois après l'inscription
-#                 if payments_for_month.exists():
-#                     total_remaining_month = sum(p.remaining_amount for p in payments_for_month)
-#                     if total_remaining_month > 0:
-#                         months_unpaid.append(month_name)
-#                         total_unpaid += float(total_remaining_month)
-#                 else:
-#                     months_unpaid.append(month_name)
-#                     total_unpaid += float(monthly_fee)
-
-#         result.append({
-#             "id": student.id,
-#             "student_name": student.student_name,
-#             "branch_name": student.branche.nom,
-#             "class_name": student.classe.nom,
-#             "phone": student.agent.whatsapp_phone if student.agent and student.agent.whatsapp_phone else student.phone,
-#             "months_unpaid": ", ".join(months_unpaid),
-#             "unpaid_amount": total_unpaid,
-#             "date_inscription": student.date_inscription,
-#         })
-
-#     return Response(result)
-
-# @api_view(['GET'])
-# def unpaid_students(request):
-#     branch_id = request.GET.get('branch_id')
-#     class_id = request.GET.get('class_id')
-#     year_id = request.GET.get('year_id')
-
-#     students = Etudiant.objects.filter(is_inscrire=1, payment_nature='mensuel')
-
-#     if branch_id:
-#         students = students.filter(branche_id=branch_id)
-#     if class_id:
-#         students = students.filter(classe_id=class_id)
-
-#     # 🔹 Année académique OBLIGATOIRE ici
-#     if not year_id:
-#         return Response({"error": "year_id est obligatoire"}, status=400)
-
-#     try:
-#         academic_year = AcademicYear.objects.get(id=year_id)
-#     except AcademicYear.DoesNotExist:
-#         return Response({"error": "année académique non trouvée"}, status=404)
-
-#     today = date.today()
-#     result = []
-
-#     for student in students:
-#         payments = Paiement.objects.filter(
-#             etudiant=student,
-#             academic_year=academic_year
-#         )
-
-#         monthly_fee = Decimal(student.remaining or 0)
-#         total_unpaid = Decimal(0)
-#         months_unpaid = []
-
-#         # 🔹 Date de début réelle
-#         start_date = max(student.date_inscription, academic_year.start_date)
-#         end_date = min(today, academic_year.end_date)
-
-#         current = date(start_date.year, start_date.month, 1)
-
-#         while current <= end_date:
-#             month_number = current.month
-#             month_name = ARABIC_MONTHS[month_number - 1]
-
-#             payments_for_month = payments.filter(month=month_number)
-
-#             # 🔹 Mois d'inscription → proportionnel
-#             if (
-#                 current.year == student.date_inscription.year
-#                 and current.month == student.date_inscription.month
-#             ):
-#                 days_in_month = monthrange(current.year, current.month)[1]
-#                 remaining_days = days_in_month - student.date_inscription.day + 1
-#                 month_due = monthly_fee * Decimal(remaining_days) / Decimal(days_in_month)
-#             else:
-#                 month_due = monthly_fee
-
-#             month_paid = sum(Decimal(p.paid_amount) for p in payments_for_month)
-#             month_unpaid = month_due - month_paid
-
-#             if month_unpaid > 0:
-#                 months_unpaid.append(month_name)
-#                 total_unpaid += month_unpaid
-
-#             # 🔹 Mois suivant
-#             if current.month == 12:
-#                 current = date(current.year + 1, 1, 1)
-#             else:
-#                 current = date(current.year, current.month + 1, 1)
-
-#         if total_unpaid > 0:
-#             result.append({
-#                 "id": student.id,
-#                 "student_name": student.student_name,
-#                 "branch_name": student.branche.nom,
-#                 "class_name": student.classe.nom,
-#                 "phone": student.agent.whatsapp_phone if student.agent and student.agent.whatsapp_phone else student.phone,
-#                 "months_unpaid": ", ".join(months_unpaid),
-#                 "unpaid_amount": float(total_unpaid),
-#                 "date_inscription": student.date_inscription,
-#             })
-
-#     return Response(result)
-
 @api_view(['GET'])
 def unpaid_students(request):
     branch_id = request.GET.get('branch_id')
@@ -2226,7 +2049,6 @@ def unpaid_students(request):
             })
 
     return Response(result)
-
 
 
 # @api_view(['GET'])
@@ -2466,8 +2288,6 @@ def class_payment_stats(request):
     return Response(list(class_stats.values()))
 
 
-from .serializers import SuspensionSerializer
-
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def create_suspension(request):
@@ -2550,39 +2370,92 @@ def create_suspension(request):
             status=500
         )
 
+
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
-def reactivate_student(request, suspension_id):
+def reactivate_student(request, student_id):
     """
-    Reactivate a suspended student
+    Réactive un étudiant, même si aucune suspension n'existe.
     """
     try:
-        suspension = Suspension.objects.get(id=suspension_id, status='active')
-        
-        data = request.data
-        reactivation_date = date.fromisoformat(data.get('reactivation_date', date.today().isoformat()))
-        
-        # Update suspension
-        suspension.status = 'completed'
-        suspension.reactivation_date = reactivation_date
-        suspension.reactivation_reason = data.get('reason', 'إعادة تنشيط الطالب')
-        suspension.save()
-        
-        # Update student
-        student = suspension.student
-        student.is_suspended = False
+        student = Etudiant.objects.get(id=student_id)
+        reactivation_date = date.fromisoformat(
+            request.data.get('reactivation_date', date.today().isoformat())
+        )
+
+        # 🔹 Essayer de récupérer la suspension active
+        try:
+            suspension = Suspension.objects.get(student=student, status='active')
+            unpaid_months = suspension.unpaid_months_data or []
+            monthly_fee = suspension.monthly_fee or 0
+            suspension_exists = True
+        except Suspension.DoesNotExist:
+            suspension = None
+            unpaid_months = []
+            monthly_fee = request.data.get('month_fee', 0)  # Optionnel si tu veux calculer les paiements
+            suspension_exists = False
+
+        created_count = 0
+
+        # =====================================================
+        # 1️⃣ Créer les Paiements si suspension existait
+        # =====================================================
+        for item in unpaid_months:
+            month = int(item["month"])
+            academic_year_label = item["academic_year"]
+
+            academic_year = AcademicYear.objects.filter(year=academic_year_label).first()
+            if not academic_year:
+                continue
+
+            due_amount = Decimal(str(item["due_amount"]))
+            paid_amount = Decimal(str(item.get("paid_amount", 0)))
+            remaining_amount = Decimal(str(item["remaining_amount"]))
+
+            Paiement.objects.get_or_create(
+                etudiant=student,
+                academic_year=academic_year,
+                month=month,
+                defaults={
+                    "due_amount": due_amount,
+                    "paid_amount": paid_amount,
+                    "remaining_amount": remaining_amount,
+                    "user": request.user
+                }
+            )
+            created_count += 1
+
+        # =====================================================
+        # 2️⃣ Mettre à jour la suspension si existait
+        # =====================================================
+        if suspension_exists:
+            suspension.status = 'completed'
+            suspension.reactivation_date = reactivation_date
+            suspension.reactivation_reason = request.data.get(
+                'reason', 'إعادة تنشيط الطالب'
+            )
+            suspension.save()
+
+        # =====================================================
+        # 3️⃣ Mettre à jour l'étudiant
+        # =====================================================
         student.suspension_reason = ''
         student.date_desectivation = None
         student.date_inscription = reactivation_date
         student.etat = "inscrit"
         student.save()
-        
+
         return Response({
             "success": True,
-            "message": "تم إعادة تنشيط الطالب بنجاح"
+            "message": "تم إعادة تنشيط الطالب بنجاح",
+            "months_restored": created_count,
+            "suspension_exists": suspension_exists
         })
-        
-    except Suspension.DoesNotExist:
-        return Response({"error": "تعليق غير موجود أو غير نشط"}, status=404)
+
+    except Etudiant.DoesNotExist:
+        return Response({"error": "الطالب غير موجود"}, status=404)
     except Exception as e:
         return Response({"error": str(e)}, status=400)
+
+
+        
