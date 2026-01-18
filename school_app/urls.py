@@ -46,6 +46,7 @@ urlpatterns = [
     path('api/', include(router.urls)),
     path('api/daily-absence/par-month', daily_absence_list, name='daily-absence-by-month'),
     path('api/daillys/filter/', filter_transactions, name='filter-dailly'),
+    path('api/filter/transations-modifier/', filter_transactions_modfier, name='filter-dailly'),
     path('api/preview/filter/', filter_transactions_account, name='filter-dailly'),
     path('api/unpaid-students/', unpaid_students, name='unpaid-students'),
     path('api/class-stats/', class_payment_stats, name='class-stats'),

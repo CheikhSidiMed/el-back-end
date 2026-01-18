@@ -32,6 +32,7 @@ from .pagination import EtudiantPagination
 from rest_framework import filters
 from django.db import transaction as db_transaction
 from .filters import UtilisateurFilter
+from rest_framework.permissions import AllowAny
 
 
 MONTHS_AR = {
@@ -144,17 +145,13 @@ class EtudiantViewSet(viewsets.ModelViewSet):
         self.perform_create(serializer)
         return Response(serializer.data, status=201)
 
-
-
 class MoisViewSet(viewsets.ModelViewSet):
     queryset = Mois.objects.all()
     serializer_class = MoisSerializer
 
-
 class AccountCategoryViewSet(viewsets.ModelViewSet):
     queryset = AccountCategory.objects.all()
     serializer_class = AccountCategorySerializer
-
 
 class InscriptionViewSet(viewsets.ModelViewSet):
     queryset = Inscription.objects.all()
@@ -162,23 +159,19 @@ class InscriptionViewSet(viewsets.ModelViewSet):
     filter_backends = [DjangoFilterBackend]
     filterset_fields = ['activity', 'student']
 
-
 class GarantViewSet(viewsets.ModelViewSet):
     queryset = Garant.objects.all()
     serializer_class = GarantSerializer
     # filter_backends = [DjangoFilterBackend]
     # filterset_fields = ['activity', 'student']
 
-
 class JobViewSet(viewsets.ModelViewSet):
     queryset = Job.objects.all()
     serializer_class = JobSerializer
 
-
 class AccountViewSet(viewsets.ModelViewSet):
     queryset = Account.objects.all()
     serializer_class = AccountSerializer
-
 
 class TransactionViewSet(viewsets.ModelViewSet):
     queryset = Transaction.objects.all()
@@ -220,23 +213,148 @@ class TransactionViewSet(viewsets.ModelViewSet):
             "transaction": serializer.data
         }, status=status.HTTP_201_CREATED)
 
-    # Lors de la modification
-    def perform_update(self, serializer):
-        transaction = serializer.save()
 
-        return transaction
+    # def perform_update(self, serializer):
+    #     old_instance = self.get_object()
+
+    #     with db_transaction.atomic():
+    #         # 🔹 Mise à jour normale (signals s’occupent de tout)
+    #         updated_tx = serializer.save()
+
+    #         # 🔹 Calcul de la différence
+    #         diff = updated_tx.paid_amount - old_instance.paid_amount
+
+    #         # 🔹 Création d'une transaction d’ajustement (OPTIONNEL)
+    #         if diff != 0:
+    #             Transaction.objects.create(
+    #                 student=updated_tx.student,
+    #                 bank=updated_tx.bank,
+    #                 account=updated_tx.account,
+    #                 employee=updated_tx.employee,
+    #                 inscription=updated_tx.inscription,
+    #                 user=self.request.user,
+    #                 paid_amount=abs(diff),
+    #                 type="plus" if diff > 0 else "minus",
+    #                 description=f"تعديل للمعاملة رقم {updated_tx.id}, {updated_tx.description}",
+    #                 related_transaction=updated_tx,  # optionnel
+    #             )
+
+    #     return updated_tx
+
+
+    # def perform_update(self, serializer):
+    #     with db_transaction.atomic():
+
+    #         # 🔹 récupérer ancien montant depuis la DB
+    #         old_tx = Transaction.objects.select_for_update().get(pk=self.get_object().pk)
+    #         old_amount = old_tx.paid_amount
+
+    #         # 🔹 sauvegarde (signal corrige le solde)
+    #         updated_tx = serializer.save()
+
+    #         # 🔹 calcul de la différence
+    #         delta = updated_tx.paid_amount - old_amount
+
+    #         print("old_amount", old_amount)
+    #         print("updated_amount", updated_tx.paid_amount)
+    #         print("delta", delta)
+
+    #         # 🔹 transaction d’ajustement (LOG UNIQUEMENT)
+    #         if delta != 0:
+    #             Transaction.objects.create(
+    #                 student=updated_tx.student,
+    #                 bank=updated_tx.bank,
+    #                 account=updated_tx.account,
+    #                 employee=updated_tx.employee,
+    #                 inscription=updated_tx.inscription,
+    #                 user=self.request.user,
+    #                 paid_amount=abs(delta),
+    #                 type="minus" if delta < 0 else "plus",
+    #                 description=f"تعديل على المعاملة رقم {updated_tx.id}",
+    #                 is_adjustment=True,
+    #                 related_transaction=updated_tx,
+    #             )
+
+    #     return updated_tx
+
+    def perform_update(self, serializer):
+        with db_transaction.atomic():
+
+            old_instance = self.get_object()
+            old_amount = old_instance.paid_amount
+
+            # 🔹 update sans toucher au solde
+            updated_tx = serializer.save(is_adjustment=True)
+
+            delta = updated_tx.paid_amount - old_amount
+
+            if delta != 0:
+                # 🔹 appliquer uniquement la différence
+                if delta > 0:
+                    updated_tx.bank.balance += delta
+                    tx_type = "plus"
+                else:
+                    updated_tx.bank.balance -= abs(delta)
+                    tx_type = "minus"
+
+                updated_tx.bank.save()
+
+                # 🔹 historique (optionnel)
+                Transaction.objects.create(
+                    student=updated_tx.student,
+                    bank=updated_tx.bank,
+                    account=updated_tx.account,
+                    employee=updated_tx.employee,
+                    inscription=updated_tx.inscription,
+                    user=self.request.user,
+                    paid_amount=abs(delta),
+                    type=tx_type,
+                    description=f"تعديل على المعاملة رقم {updated_tx.id} / {updated_tx.description}",
+                    is_adjustment=True,
+                    related_transaction=updated_tx,
+                )
+
+            return updated_tx
+
 
     def update(self, request, *args, **kwargs):
-        partial = kwargs.pop('partial', False)
+        partial = kwargs.pop("partial", False)
         instance = self.get_object()
-        serializer = self.get_serializer(instance, data=request.data, partial=partial)
+
+        serializer = self.get_serializer(
+            instance, data=request.data, partial=partial
+        )
         serializer.is_valid(raise_exception=True)
+
         transaction = self.perform_update(serializer)
 
-        return Response({
-            "message": "تم تعديل المعاملة بنجاح ✅",
-            "transaction": TransactionSerializer(transaction).data
-        }, status=status.HTTP_200_OK)
+        return Response(
+            {
+                "message": "تم تعديل المعاملة بنجاح ",
+                "transaction": TransactionSerializer(transaction).data,
+            },
+            status=status.HTTP_200_OK,
+        )
+    
+    
+    # # Lors de la modification
+    # def perform_update(self, serializer):
+    #     transaction = serializer.save()
+
+    #     return transaction
+
+    # def update(self, request, *args, **kwargs):
+    #     partial = kwargs.pop('partial', False)
+    #     instance = self.get_object()
+    #     serializer = self.get_serializer(instance, data=request.data, partial=partial)
+    #     serializer.is_valid(raise_exception=True)
+    #     transaction = self.perform_update(serializer)
+
+    #     return Response({
+    #         "message": "تم تعديل المعاملة بنجاح ✅",
+    #         "transaction": TransactionSerializer(transaction).data
+    #     }, status=status.HTTP_200_OK)
+
 
 class PaiementViewSet(viewsets.ModelViewSet):
     queryset = Paiement.objects.all()
@@ -721,7 +839,7 @@ class PaiementViewSet(viewsets.ModelViewSet):
                 ReceiptPayment.objects.create(receipt=receipt, transaction=txn)
 
             return Response({
-                "message": "✅ Paiement supprimé avec succès.",
+                "message": " Paiement supprimé avec succès.",
                 "bank": bank.id if bank else None,
                 "new_balance": str(bank.balance) if bank and hasattr(bank, "balance") else None
             }, status=status.HTTP_200_OK)
@@ -831,91 +949,6 @@ class GarantPaiementViewSet(viewsets.ModelViewSet):
             "transactions": txn.description,
             "created_by": request.user.first_name,
         })
-
-        # return Response({
-        #     "message": "Paiement combiné avec succès",
-        #     "receipt_id": receipt.pk,
-        #     "transaction_id": txn.pk,
-        #     "months": txn.month,
-        #     "paid_amount": total_paid,
-        #     "remaining_amount": remaining_amount,
-        # })
-
-    # @action(detail=False, methods=['post'])
-    # def process_payment(self, request):
-    #     data = request.data
-    #     payments = data.get("payments")  # list of {garant, month, due_amount, paid_amount}
-    #     bank_id = data.get("bank")
-
-    #     if not payments:
-    #         return Response({"error": "No payments provided"}, status=400)
-
-    #     with transaction.atomic():
-    #         # --- Paiement sans agent (pour un seul étudiant) ---
-    #         garant_id = data.get("garant")
-    #         if not garant_id:
-    #             return Response({"error": "No garant provided for payment"}, status=400)
-    #         garant = Garant.objects.get(id=garant_id)
-
-    #         receipt = Receipt.objects.create(
-    #             garant=garant,
-    #             agent_id=None,
-    #             total_amount=sum([p["paid_amount"] for p in payments]),
-    #             receipt_date=timezone.now(),
-    #             created_by=request.user,
-    #             receipt_description="Paiement des frais de scolarité"
-    #         )
-
-    #         created_transactions = []
-    #         for p in payments:
-    #             # 🔹 check if this month already has a GarantPaiement
-    #             existing = GarantPaiement.objects.filter(
-    #                 garant=garant,
-    #                 academic_year_id=p.get("academic_year"),
-    #                 month=p["month"]
-    #             ).order_by("-id").first()
-
-    #             if existing:
-    #                 new_paid = existing.paid_amount + p["paid_amount"]
-    #                 new_remaining = max(0, p["due_amount"] - new_paid)
-    #             else:
-    #                 new_paid = p["paid_amount"]
-    #                 new_remaining = max(0, p["due_amount"] - new_paid)
-
-    #             txn = Transaction.objects.create(
-    #                 garant=garant,
-    #                 agent_id=None,
-    #                 month=p["month"],
-    #                 due_amount=p["due_amount"],
-    #                 paid_amount=p["paid_amount"],  # this transaction only
-    #                 remaining_amount=new_remaining,
-    #                 date=timezone.now(),
-    #                 bank_id=bank_id,
-    #                 user=request.user
-    #             )
-
-    #             ReceiptPayment.objects.create(receipt=receipt, transaction=txn)
-
-    #             GarantPaiement.objects.create(
-    #                 garant=garant,
-    #                 academic_year_id=p.get("academic_year"),
-    #                 month=p["month"],
-    #                 due_amount=p["due_amount"],
-    #                 paid_amount=new_paid, 
-    #                 remaining_amount=new_remaining,
-    #                 bank_id=bank_id,
-    #                 user=request.user
-    #             )
-
-    #             created_transactions.append(txn.id)
-
-    #     return Response({
-    #         "message": "Paiement traité avec succès",
-    #         "receipt_id": receipt.pk,
-    #         "receipt_date": receipt.receipt_date.strftime("%Y-%m-%d | %H:%M:%S"),
-    #         "transactions": created_transactions,
-    #         "created_by": request.user.first_name,
-    #     })
 
 
 class BankAccountViewSet(viewsets.ModelViewSet):
@@ -1269,12 +1302,10 @@ class AcademicYearViewSet(viewsets.ModelViewSet):
     serializer_class = AcademicYearSerializer
     lookup_field     = "id"
 
-from rest_framework.permissions import AllowAny
 
 class RegisterUserView(generics.CreateAPIView):
     serializer_class = UtilisateurRegisterSerializer
     permission_classes = [AllowAny]
-
 
 class BankTransferView(APIView):
     permission_classes = [IsAuthenticated]
@@ -1341,104 +1372,6 @@ def daily_absence_list(request):
 
     serializer = DailyAbsenceSerializer(queryset, many=True)
     return Response(serializer.data)
-
-
-
-
-# @api_view(['GET'])
-# def student_payments(request):
-#     student_id = request.GET.get('student_id')
-#     year_id = request.GET.get('academic_year')
-#     full_month_fee = request.GET.get('month_fee')
-
-#     try:
-#         full_month_fee = Decimal(full_month_fee)
-#     except:
-#         return Response({"error": "Invalid month_fee"}, status=400)
-
-#     try:
-#         student = Etudiant.objects.get(id=student_id)
-#         academic_year = AcademicYear.objects.get(id=year_id)
-#     except:
-#         return Response({"error": "Invalid student or academic year"}, status=400)
-
-#     # 🔑 Paiements existants
-#     payments = Paiement.objects.filter(
-#         etudiant=student,
-#         academic_year=academic_year
-#     ).values('month', 'paid_amount', 'remaining_amount')
-
-#     payments_dict = {p['month']: p for p in payments}
-
-#     # 🔑 Calcul de l’inscription
-#     academic_year_start = academic_year.start_date.year
-#     academic_year_end = academic_year.end_date.year
-#     same_year = academic_year_start <= student.date_inscription.year <= academic_year_end
-#     registration_month = student.date_inscription.month
-#     registration_day = student.date_inscription.day
-
-#     result = []
-
-#     for month in range(1, 13):
-#         # 🔹 Paiement normal
-#         payment = payments_dict.get(month)
-
-#         # CAS 1 : inscription même année et mois avant inscription
-#         if same_year and month < registration_month:
-#             due_amount = Decimal("0.00")
-#             paid_amount = Decimal("0.00")
-#             remaining_amount = Decimal("0.00")
-#             status, status_bool = "paid", True
-
-#         # CAS 2 : mois d’inscription
-#         elif same_year and month == registration_month:
-#             days_in_month = monthrange(academic_year_start, month)[1]
-#             proportion = Decimal(days_in_month - registration_day + 1) / Decimal(days_in_month)
-#             due_amount = (full_month_fee * proportion).quantize(Decimal("0.01"))
-
-#             if payment:
-#                 paid_amount = payment['paid_amount']
-#                 remaining_amount = due_amount - paid_amount
-#             else:
-#                 paid_amount = Decimal("0.00")
-#                 remaining_amount = due_amount
-
-#             if remaining_amount <= 0:
-#                 status, status_bool = "paid", True
-#             elif paid_amount > 0:
-#                 status, status_bool = "partial", False
-#             else:
-#                 status, status_bool = "unpaid", False
-
-#         # CAS 3 : mois normaux
-#         else:
-#                 due_amount = full_month_fee
-#                 if payment:
-#                     paid_amount = payment['paid_amount']
-#                     remaining_amount = payment['remaining_amount'] if payment.get('remaining_amount') is not None else due_amount - paid_amount
-#                 else:
-#                     paid_amount = Decimal("0.00")
-#                     remaining_amount = due_amount
-
-#                 if remaining_amount <= 0:
-#                     status, status_bool = "paid", True
-#                 elif paid_amount > 0:
-#                     status, status_bool = "partial", False
-#                 else:
-#                     status, status_bool = "unpaid", False
-
-#         result.append({
-#             "month": month,
-#             "month_name_ar": ARABIC_MONTHS[month - 1],
-#             "status": status,
-#             "status_bool": status_bool,
-#             "due_amount": float(due_amount),
-#             "paid_amount": float(paid_amount),
-#             "remaining_amount": float(remaining_amount)
-#         })
-
-#     return Response(result)
-
 
 
 @api_view(['GET'])
@@ -1810,6 +1743,11 @@ def store_old_values(sender, instance, **kwargs):
 
 @receiver(post_save, sender=Transaction)
 def update_balances_on_save(sender, instance, created, **kwargs):
+
+    # Ignorer les transactions d’ajustement
+    if instance.is_adjustment:
+        return
+
     def update_balance(obj, field_name, amount, operation):
         if not obj:
             return
@@ -1868,44 +1806,63 @@ def restore_balances_on_delete(sender, instance, **kwargs):
 
 
 @api_view(['GET'])
+@permission_classes([IsAuthenticated])
 def filter_transactions(request):
-    start_date = request.GET.get("start_date")
-    end_date = request.GET.get("end_date")
-    user_id = request.GET.get("user_id")
+    today = date.today()
 
-    if not start_date or not end_date:
-        return Response({"error": "Both start_date and end_date are required"}, status=400)
+    # 🔹 Dates par défaut = aujourd’hui
+    start_date = request.GET.get("start_date", today)
+    end_date = request.GET.get("end_date", today)
+
+    # 🔹 Utilisateur par défaut = user connecté
+    user_id = request.GET.get("user_id", request.user.id)
 
     # ---- Transactions dans l'intervalle ----
     transactions = Transaction.objects.filter(
         date__date__gte=start_date,
-        date__date__lte=end_date
+        date__date__lte=end_date,
+        user_id=user_id
     ).order_by("date")
-
-    if user_id:
-        transactions = transactions.filter(user_id=user_id)
 
     serializer = TransactionSerializer(transactions, many=True)
 
     # ---- Totaux période ----
-    total_plus_bank = transactions.filter(type="plus").exclude(bank__category=1).aggregate(s=Sum("paid_amount"))["s"] or 0
-    total_minus_bank = transactions.filter(type="minus").exclude(bank__category=1).aggregate(s=Sum("paid_amount"))["s"] or 0
+    total_plus_bank = transactions.filter(type="plus").exclude(bank__category=1)\
+        .aggregate(s=Sum("paid_amount"))["s"] or 0
 
-    total_plus_fund = transactions.filter(type="plus", bank__category=1).aggregate(s=Sum("paid_amount"))["s"] or 0
-    total_minus_fund = transactions.filter(type="minus", bank__category=1).aggregate(s=Sum("paid_amount"))["s"] or 0
+    total_minus_bank = transactions.filter(type="minus").exclude(bank__category=1)\
+        .aggregate(s=Sum("paid_amount"))["s"] or 0
+
+    total_plus_fund = transactions.filter(type="plus", bank__category=1)\
+        .aggregate(s=Sum("paid_amount"))["s"] or 0
+
+    total_minus_fund = transactions.filter(type="minus", bank__category=1)\
+        .aggregate(s=Sum("paid_amount"))["s"] or 0
 
     # ---- Solde avant start_date ----
-    before_tx = Transaction.objects.filter(date__date__lt=start_date)
-    if user_id:
-        before_tx = before_tx.filter(user_id=user_id)
+    before_tx = Transaction.objects.filter(
+        date__date__lt=start_date,
+        user_id=user_id
+    )
 
-    before_plus_bank = before_tx.filter(type="plus").exclude(bank__category=1).aggregate(s=Sum("paid_amount"))["s"] or 0
-    before_minus_bank = before_tx.filter(type="minus").exclude(bank__category=1).aggregate(s=Sum("paid_amount"))["s"] or 0
+    before_plus_bank = before_tx.filter(type="plus").exclude(bank__category=1)\
+        .aggregate(s=Sum("paid_amount"))["s"] or 0
 
-    before_plus_fund = before_tx.filter(type="plus", bank__category=1).aggregate(s=Sum("paid_amount"))["s"] or 0
-    before_minus_fund = before_tx.filter(type="minus", bank__category=1).aggregate(s=Sum("paid_amount"))["s"] or 0
+    before_minus_bank = before_tx.filter(type="minus").exclude(bank__category=1)\
+        .aggregate(s=Sum("paid_amount"))["s"] or 0
+
+    before_plus_fund = before_tx.filter(type="plus", bank__category=1)\
+        .aggregate(s=Sum("paid_amount"))["s"] or 0
+
+    before_minus_fund = before_tx.filter(type="minus", bank__category=1)\
+        .aggregate(s=Sum("paid_amount"))["s"] or 0
 
     return Response({
+        "filters": {
+            "start_date": str(start_date),
+            "end_date": str(end_date),
+            "user_id": user_id
+        },
         "transactions": serializer.data,
         "totals": {
             "fund": {
@@ -1922,8 +1879,40 @@ def filter_transactions(request):
         "before_balance": {
             "fund": float(before_plus_fund - before_minus_fund),
             "bank": float(before_plus_bank - before_minus_bank),
-            "total": float((before_plus_fund - before_minus_fund) + (before_plus_bank - before_minus_bank))
+            "total": float(
+                (before_plus_fund - before_minus_fund) +
+                (before_plus_bank - before_minus_bank)
+            )
         }
+    })
+
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def filter_transactions_modfier(request):
+    today = date.today()
+
+    # 🔹 Dates par défaut = aujourd’hui
+    start_date = request.GET.get("start_date", today)
+    end_date = request.GET.get("end_date", today)
+
+    # 🔹 Utilisateur par défaut = user connecté
+    user_id = request.GET.get("user_id", request.user.id)
+
+    # ---- Transactions dans l'intervalle ----
+    transactions = Transaction.objects.filter(
+        date__date__gte=start_date,
+        date__date__lte=end_date,
+        user_id=user_id,
+        month__isnull=True,
+        is_adjustment=False
+    ).order_by("date")
+
+    serializer = TransactionSerializer(transactions, many=True)
+
+    return Response({
+        "results": serializer.data
     })
 
 
@@ -1966,7 +1955,6 @@ def filter_transactions_account(request):
             "minus": total_minus
         },
     })
-
 
 
 @api_view(['GET'])
@@ -2049,78 +2037,6 @@ def unpaid_students(request):
             })
 
     return Response(result)
-
-
-# @api_view(['GET'])
-# def class_payment_stats(request):
-#     branch_id = request.GET.get('branch_id')
-#     month = request.GET.get('month')  # optionnel : filtrer sur un mois précis
-
-#     students = Etudiant.objects.filter(is_inscrire=1)
-#     if branch_id:
-#         students = students.filter(branche_id=branch_id)
-
-#     current_date = date.today()
-#     current_month = int(month) if month else current_date.month
-#     current_year = current_date.year
-
-#     # Dictionnaire pour regrouper les stats par classe
-#     class_stats = defaultdict(lambda: {
-#         "class_name": "",
-#         "total_students": 0,
-#         "total_due": 0.0,
-#         "total_paid": 0.0,
-#         "total_unpaid": 0.0,
-#     })
-
-#     for student in students:
-#         if not student.classe:
-#             continue
-
-#         classe_name = student.classe.nom
-#         monthly_fee = student.remaining
-#         payments = Paiement.objects.filter(etudiant=student)
-
-#         total_due = 0
-#         total_paid = 0
-#         total_unpaid = 0
-
-#         insc_date = student.date_inscription
-#         insc_month = insc_date.month
-#         insc_year = insc_date.year
-
-#         # 🔹 Calculer seulement jusqu'au mois courant
-#         for month_number in range(insc_month, current_month + 1):
-#             payments_for_month = payments.filter(month=month_number)
-
-#             # Si c’est le mois d’inscription → proportionnel
-#             if month_number == insc_month:
-#                 days_in_month = monthrange(insc_year, insc_month)[1]
-#                 remaining_days = days_in_month - insc_date.day + 1
-#                 proportional_fee = Decimal(monthly_fee) * (Decimal(remaining_days) / Decimal(days_in_month))
-#                 month_due = proportional_fee
-#             else:
-#                 month_due = Decimal(monthly_fee)
-
-#             month_paid = sum(Decimal(p.paid_amount) for p in payments_for_month)
-#             month_unpaid = max(month_due - month_paid, 0)
-
-#             total_due += float(month_due)
-#             total_paid += float(month_paid)
-#             total_unpaid += float(month_unpaid)
-
-#         # 🔹 Mise à jour des stats globales par classe
-#         stats = class_stats[classe_name]
-#         stats["class_name"] = classe_name
-#         stats["total_students"] += 1
-#         stats["total_due"] += total_due
-#         stats["total_paid"] += total_paid
-#         stats["total_unpaid"] += total_unpaid
-
-#     # Transformer le dictionnaire en liste
-#     result = list(class_stats.values())
-
-#     return Response(result)
 
 
 # @api_view(['GET'])CUMILE 

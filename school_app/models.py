@@ -522,6 +522,15 @@ class Transaction(models.Model):
         null=True, blank=True,
         related_name='transactions'
     )
+    related_transaction = models.ForeignKey(
+        "self",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="adjustments"
+    )
+    is_adjustment = models.BooleanField(default=False)
+
 
     def __str__(self):
         return f"Transaction {self.id} - {self.paid_amount}"
