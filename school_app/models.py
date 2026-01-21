@@ -127,6 +127,9 @@ class Agent(models.Model):
     profession = models.CharField(max_length=100, null=True, blank=True)
     whatsapp_phone = models.CharField(max_length=20, null=True, blank=True)
 
+    class Meta:
+        ordering = ['-id'] 
+
     def __str__(self):
         return self.agent_name
 

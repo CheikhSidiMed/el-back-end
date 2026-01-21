@@ -213,70 +213,6 @@ class TransactionViewSet(viewsets.ModelViewSet):
             "transaction": serializer.data
         }, status=status.HTTP_201_CREATED)
 
-
-    # def perform_update(self, serializer):
-    #     old_instance = self.get_object()
-
-    #     with db_transaction.atomic():
-    #         # 🔹 Mise à jour normale (signals s’occupent de tout)
-    #         updated_tx = serializer.save()
-
-    #         # 🔹 Calcul de la différence
-    #         diff = updated_tx.paid_amount - old_instance.paid_amount
-
-    #         # 🔹 Création d'une transaction d’ajustement (OPTIONNEL)
-    #         if diff != 0:
-    #             Transaction.objects.create(
-    #                 student=updated_tx.student,
-    #                 bank=updated_tx.bank,
-    #                 account=updated_tx.account,
-    #                 employee=updated_tx.employee,
-    #                 inscription=updated_tx.inscription,
-    #                 user=self.request.user,
-    #                 paid_amount=abs(diff),
-    #                 type="plus" if diff > 0 else "minus",
-    #                 description=f"تعديل للمعاملة رقم {updated_tx.id}, {updated_tx.description}",
-    #                 related_transaction=updated_tx,  # optionnel
-    #             )
-
-    #     return updated_tx
-
-
-    # def perform_update(self, serializer):
-    #     with db_transaction.atomic():
-
-    #         # 🔹 récupérer ancien montant depuis la DB
-    #         old_tx = Transaction.objects.select_for_update().get(pk=self.get_object().pk)
-    #         old_amount = old_tx.paid_amount
-
-    #         # 🔹 sauvegarde (signal corrige le solde)
-    #         updated_tx = serializer.save()
-
-    #         # 🔹 calcul de la différence
-    #         delta = updated_tx.paid_amount - old_amount
-
-    #         print("old_amount", old_amount)
-    #         print("updated_amount", updated_tx.paid_amount)
-    #         print("delta", delta)
-
-    #         # 🔹 transaction d’ajustement (LOG UNIQUEMENT)
-    #         if delta != 0:
-    #             Transaction.objects.create(
-    #                 student=updated_tx.student,
-    #                 bank=updated_tx.bank,
-    #                 account=updated_tx.account,
-    #                 employee=updated_tx.employee,
-    #                 inscription=updated_tx.inscription,
-    #                 user=self.request.user,
-    #                 paid_amount=abs(delta),
-    #                 type="minus" if delta < 0 else "plus",
-    #                 description=f"تعديل على المعاملة رقم {updated_tx.id}",
-    #                 is_adjustment=True,
-    #                 related_transaction=updated_tx,
-    #             )
-
-    #     return updated_tx
-
     def perform_update(self, serializer):
         with db_transaction.atomic():
 
@@ -316,7 +252,6 @@ class TransactionViewSet(viewsets.ModelViewSet):
 
             return updated_tx
 
-
     def update(self, request, *args, **kwargs):
         partial = kwargs.pop("partial", False)
         instance = self.get_object()
@@ -335,26 +270,6 @@ class TransactionViewSet(viewsets.ModelViewSet):
             },
             status=status.HTTP_200_OK,
         )
-    
-    
-    # # Lors de la modification
-    # def perform_update(self, serializer):
-    #     transaction = serializer.save()
-
-    #     return transaction
-
-    # def update(self, request, *args, **kwargs):
-    #     partial = kwargs.pop('partial', False)
-    #     instance = self.get_object()
-    #     serializer = self.get_serializer(instance, data=request.data, partial=partial)
-    #     serializer.is_valid(raise_exception=True)
-    #     transaction = self.perform_update(serializer)
-
-    #     return Response({
-    #         "message": "تم تعديل المعاملة بنجاح ✅",
-    #         "transaction": TransactionSerializer(transaction).data
-    #     }, status=status.HTTP_200_OK)
-
 
 class PaiementViewSet(viewsets.ModelViewSet):
     queryset = Paiement.objects.all()
@@ -950,7 +865,6 @@ class GarantPaiementViewSet(viewsets.ModelViewSet):
             "created_by": request.user.first_name,
         })
 
-
 class BankAccountViewSet(viewsets.ModelViewSet):
     queryset = BankAccount.objects.all()
     serializer_class = BankAccountSerializer
@@ -981,7 +895,6 @@ class ReceiptViewSet(viewsets.ModelViewSet):
     queryset = Receipt.objects.all()
     serializer_class = ReceiptSerializer
 
-
 class ReceiptPaymentViewSet(viewsets.ModelViewSet):
     queryset = ReceiptPayment.objects.all()
     serializer_class = ReceiptPaymentSerializer
@@ -1004,7 +917,6 @@ class DailyAbsenceViewSet(viewsets.ModelViewSet):
 class SuspensionViewSet(viewsets.ModelViewSet):
     queryset = Suspension.objects.all()
     serializer_class = SuspensionSerializer
-
 
 class EmployeeViewSet(viewsets.ModelViewSet):
     queryset = Employee.objects.all()
@@ -1146,7 +1058,6 @@ class EmployeeViewSet(viewsets.ModelViewSet):
             }
         }, status=200)
 
-
 class SalaryPaymentViewSet(viewsets.ModelViewSet):
     queryset = SalaryPayment.objects.all()
     serializer_class = SalaryPaymentSerializer
@@ -1234,8 +1145,7 @@ class SalaryPaymentViewSet(viewsets.ModelViewSet):
             msg += f" تم تخطي {skipped} موظف (مسجل مسبقاً أو غير صالح)."
 
         return Response({"success": True, "message": msg})
-
-        
+       
 class MonthlyReportViewSet(viewsets.ModelViewSet):
     queryset = MonthlyReport.objects.all()
     serializer_class = MonthlyReportSerializer
@@ -1253,7 +1163,6 @@ class MonthlyReportViewSet(viewsets.ModelViewSet):
                 year=year
             )
         return queryset
-
 
 class UtilisateurViewSet(viewsets.ModelViewSet):
     queryset = Utilisateur.objects.all()
@@ -1291,17 +1200,14 @@ class UtilisateurViewSet(viewsets.ModelViewSet):
             status=status.HTTP_200_OK
         )
             
-
 class MyTokenObtainPairView(TokenObtainPairView):
     serializer_class = MyTokenObtainPairSerializer
-
 
 class AcademicYearViewSet(viewsets.ModelViewSet):
     """Full CRUD for AcademicYear (list, retrieve, create, update, delete)."""
     queryset         = AcademicYear.objects.all()
     serializer_class = AcademicYearSerializer
     lookup_field     = "id"
-
 
 class RegisterUserView(generics.CreateAPIView):
     serializer_class = UtilisateurRegisterSerializer
@@ -1351,6 +1257,27 @@ class BankTransferView(APIView):
             "amount": amount,
             "from": source.id,
             "to": destination.id
+        })
+
+class ClasseEffectifAPIView(APIView):
+    def get(self, request, classe_id):
+        try:
+            classe = Classe.objects.get(id=classe_id)
+        except Classe.DoesNotExist:
+            return Response(
+                {"error": "Classe introuvable"},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        nombre_inscrits = classe.etudiants.filter(
+            etat='inscrit'
+        ).count()
+
+        return Response({
+            "classe_id": classe.id,
+            "classe": classe.nom,
+            "niveau": classe.niveau,
+            "totals": nombre_inscrits
         })
 
 
@@ -1631,28 +1558,6 @@ def unpaid_months_until_suspend(request):
     })
 
 
-class ClasseEffectifAPIView(APIView):
-    def get(self, request, classe_id):
-        try:
-            classe = Classe.objects.get(id=classe_id)
-        except Classe.DoesNotExist:
-            return Response(
-                {"error": "Classe introuvable"},
-                status=status.HTTP_404_NOT_FOUND
-            )
-
-        nombre_inscrits = classe.etudiants.filter(
-            etat='inscrit'
-        ).count()
-
-        return Response({
-            "classe_id": classe.id,
-            "classe": classe.nom,
-            "niveau": classe.niveau,
-            "totals": nombre_inscrits
-        })
-
-
 @api_view(['GET'])
 def garant_payments(request):
     garant_id = request.GET.get('garant_id')
@@ -1887,7 +1792,6 @@ def filter_transactions(request):
     })
 
 
-
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def filter_transactions_modfier(request):
@@ -2039,92 +1943,6 @@ def unpaid_students(request):
     return Response(result)
 
 
-# @api_view(['GET'])CUMILE 
-# def class_payment_stats(request):
-#     branch_id = request.GET.get('branch_id')
-#     month = request.GET.get('month')  # optionnel
-#     year_id = request.GET.get('year_id')  # 🔹 nouvel argument
-
-#     students = Etudiant.objects.filter(is_inscrire=1)
-#     if branch_id:
-#         students = students.filter(branche_id=branch_id)
-
-#     today = date.today()
-#     target_month = int(month) if month else today.month
-
-#     # Si year_id fourni → récupérer AcademicYear
-#     if year_id:
-#         try:
-#             academic_year = AcademicYear.objects.get(id=year_id)
-#         except AcademicYear.DoesNotExist:
-#             return Response({"error": "année académique non trouvée"}, status=404)
-#     else:
-#         academic_year = None
-
-#     class_stats = defaultdict(lambda: {
-#         "class_name": "",
-#         "total_students": 0,
-#         "total_due": 0.0,
-#         "total_paid": 0.0,
-#         "total_unpaid": 0.0,
-#     })
-
-#     for student in students:
-#         if not student.classe:
-#             continue
-
-#         classe_name = student.classe.nom
-#         monthly_fee = Decimal(student.remaining or 0)
-#         payments = Paiement.objects.filter(etudiant=student)
-
-#         total_due = Decimal(0)
-#         total_paid = Decimal(0)
-#         total_unpaid = Decimal(0)
-
-#         current = date(student.date_inscription.year, student.date_inscription.month, 1)
-#         end_date = date(today.year, target_month, 1)
-
-#         while current <= end_date:
-#             # 🔹 Filtrer les paiements par année académique si fournie
-#             if academic_year:
-#                 payments_for_month = payments.filter(month=current.month, academic_year=academic_year)
-#             else:
-#                 year_obj = AcademicYear.objects.filter(
-#                     start_date__lte=current,
-#                     end_date__gte=current
-#                 ).first()
-#                 payments_for_month = payments.filter(month=current.month, academic_year=year_obj) if year_obj else payments.filter(month=current.month)
-
-#             # Frais proportionnels pour le mois d'inscription
-#             if current.year == student.date_inscription.year and current.month == student.date_inscription.month:
-#                 days_in_month = monthrange(current.year, current.month)[1]
-#                 remaining_days = days_in_month - student.date_inscription.day + 1
-#                 month_due = monthly_fee * Decimal(remaining_days) / Decimal(days_in_month)
-#             else:
-#                 month_due = monthly_fee
-
-#             month_paid = sum(Decimal(p.paid_amount) for p in payments_for_month)
-#             month_unpaid = max(month_due - month_paid, Decimal(0))
-
-#             total_due += month_due
-#             total_paid += month_paid
-#             total_unpaid += month_unpaid
-
-#             # Passer au mois suivant
-#             if current.month == 12:
-#                 current = date(current.year + 1, 1, 1)
-#             else:
-#                 current = date(current.year, current.month + 1, 1)
-
-#         stats = class_stats[classe_name]
-#         stats["class_name"] = classe_name
-#         stats["total_students"] += 1
-#         stats["total_due"] += float(total_due)
-#         stats["total_paid"] += float(total_paid)
-#         stats["total_unpaid"] += float(total_unpaid)
-
-#     return Response(list(class_stats.values()))
-
 @api_view(['GET'])
 def class_payment_stats(request):
     branch_id = request.GET.get('branch_id')
@@ -2136,7 +1954,14 @@ def class_payment_stats(request):
     today = date.today()
     target_month = int(month) if month else today.month
 
-    students = Etudiant.objects.filter(is_inscrire=1, payment_nature='mensuel', etat='inscrit')
+    students = Etudiant.objects.filter(
+            is_inscrire=1, 
+            payment_nature='mensuel', 
+            etat='inscrit', 
+            is_active=True
+        ).exclude(
+            date_desectivation__isnull=False,
+        )
     if branch_id:
         students = students.filter(branche_id=branch_id)
 
