@@ -1934,6 +1934,10 @@ def unpaid_students(request):
     students = Etudiant.objects.filter(
         is_inscrire=1,
         payment_nature='mensuel'
+        etat='inscrit', 
+        is_active=True
+    ).exclude(
+        date_desectivation__isnull=False,
     )
 
     if branch_id:
