@@ -35,13 +35,6 @@ from .filters import UtilisateurFilter
 from rest_framework.permissions import AllowAny
 
 
-from django.utils import timezone
-from datetime import date
-from school_app.models import Etudiant
-
-Etudiant.objects.filter(etat="suspendu", date_desectivation__isnull=True).update(date_desectivation=date(2025, 12, 31))
-
-
 MONTHS_AR = {
     1: "يناير",
     2: "فبراير",
