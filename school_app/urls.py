@@ -43,7 +43,7 @@ router.register(r'exams', ExamViewSet, basename="exam")
 router.register(r'abs-elmhdaras', AbsElmhdaraViewSet, basename="abs-elmhdara")
 
 urlpatterns = [
-    path('api/', include(router.urls)),
+    path('', include(router.urls)),
     path('api/daily-absence/par-month', daily_absence_list, name='daily-absence-by-month'),
     path('api/daillys/filter/', filter_transactions, name='filter-dailly'),
     path('api/filter/transations-modifier/', filter_transactions_modfier, name='filter-dailly'),

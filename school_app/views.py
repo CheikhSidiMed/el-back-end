@@ -35,6 +35,13 @@ from .filters import UtilisateurFilter
 from rest_framework.permissions import AllowAny
 
 
+from django.utils import timezone
+from datetime import date
+from school_app.models import Etudiant
+
+Etudiant.objects.filter(etat="suspendu", date_desectivation__isnull=True).update(date_desectivation=date(2025, 12, 31))
+
+
 MONTHS_AR = {
     1: "يناير",
     2: "فبراير",
@@ -701,6 +708,53 @@ class PaiementViewSet(viewsets.ModelViewSet):
             "created_by": request.user.first_name,
         })
 
+    def perform_update(self, serializer):
+        with db_transaction.atomic():
+
+            paiement = self.get_object()
+
+            old_paid = paiement.paid_amount
+            new_paid = Decimal(self.request.data.get("paid_amount"))
+            new_bank = self.request.data.get("bank_id")
+            delta = new_paid - old_paid
+            remaining_amount =  paiement.due_amount - new_paid
+
+
+
+            # 1️⃣ Update paiement
+            paiement.paid_amount = new_paid
+            paiement.bank_id = new_bank
+            paiement.remaining_amount = remaining_amount
+            paiement.save()
+
+            # ⛔ No change → no transaction
+            if delta == 0:
+                return
+
+            etudiant = paiement.etudiant
+            student_name = etudiant.student_name if etudiant else ""
+            # # 2️⃣ Update bank balance
+            # bank.balance += delta
+            # bank.save()
+
+            month_number = paiement.month
+            month_name = MONTHS_AR.get(month_number, "")
+
+            # 3️⃣ Create adjustment transaction
+            Transaction.objects.create(
+                student=paiement.etudiant,
+                agent=paiement.agent,
+                month=str(paiement.month),
+                due_amount=paiement.due_amount,
+                paid_amount=abs(delta),
+                remaining_amount=remaining_amount,
+                description=f"تعديل دفع شهر {month_name}, {student_name}",
+                type="plus" if delta > 0 else "minus",
+                bank_id=new_bank,
+                user=self.request.user,
+                is_adjustment=False,
+                related_transaction=None  # or original transaction if you store it
+            )
 
     @action(detail=True, methods=['post'])
     def delete_payment(self, request, pk=None):
@@ -1629,6 +1683,7 @@ def garant_payments(request):
 # On sauvegarde l'ancien état avant la mise à jour
 @receiver(pre_save, sender=Transaction)
 def store_old_values(sender, instance, **kwargs):
+
     if instance.pk:
         try:
             old_instance = Transaction.objects.get(pk=instance.pk)
@@ -1654,6 +1709,7 @@ def update_balances_on_save(sender, instance, created, **kwargs):
         return
 
     def update_balance(obj, field_name, amount, operation):
+
         if not obj:
             return
         amount = Decimal(str(amount))

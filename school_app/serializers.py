@@ -510,7 +510,7 @@ class PaiementSerializer(serializers.ModelSerializer):
     )
     bank = BankAccountSerializer(read_only=True)
     bank_id = serializers.PrimaryKeyRelatedField(
-        queryset=BankAccount.objects.all(), source='bankAccount', write_only=True, required=False
+        queryset=BankAccount.objects.all(), source='bank', write_only=True, required=False
     )
     user = UtilisateurSerializer(read_only=True)
     user_id = serializers.PrimaryKeyRelatedField(
