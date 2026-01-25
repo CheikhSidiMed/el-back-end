@@ -34,6 +34,20 @@ from django.db import transaction as db_transaction
 from .filters import UtilisateurFilter
 from rest_framework.permissions import AllowAny
 
+MONTHS_AR_REVERSE = {
+    "يناير": 1,
+    "فبراير": 2,
+    "مارس": 3,
+    "أبريل": 4,
+    "مايو": 5,
+    "يونيو": 6,
+    "يوليو": 7,
+    "أغسطس": 8,
+    "سبتمبر": 9,
+    "أكتوبر": 10,
+    "نوفمبر": 11,
+    "ديسمبر": 12,
+}
 
 MONTHS_AR = {
     1: "يناير",
@@ -295,101 +309,6 @@ class PaiementViewSet(viewsets.ModelViewSet):
 
         with transaction.atomic():
 
-            # if not agent_id:
-            #     created_transactions = []
-
-            #     # --- Paiement sans agent (pour un seul étudiant) ---
-            #     student_id = data.get("student")
-            #     if not student_id:
-            #         return Response({"error": "No student provided for payment"}, status=400)
-            #     student = Etudiant.objects.get(id=student_id)
-
-            #     # 🔹 Combine all items (months + extras)
-            #     total_amount = (
-            #         sum(p["paid_amount"] for p in payments)
-            #         + sum(e["amount"] for e in extras)
-            #     )
-
-            #     # 🔹 Build description
-            #     month_part = (
-            #         f" الأشهر: {', '.join(p['month_name_ar'] for p in payments)}"
-            #         if payments else ""
-            #     )
-            #     extra_part = (
-            #         " + " + ", ".join(e["des"] for e in extras)
-            #         if extras else ""
-            #     )
-            #     description = f"الطالب(ة) {payments[0]['student_name'] if payments else student.student_name}  سدد(ت) {month_part} {extra_part}"
-
-            #     # Create Receipt
-            #     receipt = Receipt.objects.create(
-            #         student=student,
-            #         agent_id=None,
-            #         total_amount=total_amount,
-            #         receipt_date=timezone.now(),
-            #         created_by=request.user,
-            #         receipt_description=description
-            #     )
-
-            #     # Create Transaction (global one for both months + extras)
-            #     if payments:
-            #         txn = Transaction.objects.create(
-            #             student=student,
-            #             agent_id=None,
-            #             month=', '.join(str(p["month"]) for p in payments) if payments else None,
-            #             due_amount=sum(p["due_amount"] for p in payments) if payments else 0,
-            #             paid_amount=total_amount,
-            #             remaining_amount=sum(p["remaining_amount"] for p in payments) if payments else 0,
-            #             date=timezone.now(),
-            #             description = f"الطالب(ة) {payments[0]['student_name']} سدد(ت) الأشهر: {{ {', '.join(p['month_name_ar'] for p in payments)} }}",
-            #             bank_id=bank_id,
-            #             user=request.user
-            #         )
-            #         ReceiptPayment.objects.create(receipt=receipt, transaction=txn)
-            #         created_transactions.append(txn.id)
-
-            #     if extras:
-            #         for ex in extras:
-            #             txn = Transaction.objects.create(
-            #                 student=student,
-            #                 agent_id=None,
-            #                 month=None,
-            #                 due_amount=0,
-            #                 paid_amount=ex["amount"],
-            #                 remaining_amount=0,
-            #                 date=timezone.now(),
-            #                 description = f"الطالب(ة) {ex['student_name']} سدد(ت) : {{ {ex['des']} }}",
-            #                 bank_id=bank_id,
-            #                 user=request.user
-            #             )
-            #             ReceiptPayment.objects.create(receipt=receipt, transaction=txn)
-            #             created_transactions.append(txn.id)
-
-            #     # 🔹 Créer ou mettre à jour les enregistrements de paiement pour chaque mois
-            #     for p in payments:
-            #         paiement, created = Paiement.objects.get_or_create(
-            #             etudiant=student,
-            #             academic_year_id=p.get("academic_year"),
-            #             month=p["month"],
-            #             defaults={
-            #                 "due_amount": p["due_amount"],
-            #                 "paid_amount": p["paid_amount"],
-            #                 "remaining_amount": max(0, p["due_amount"] - p["paid_amount"]),
-            #                 "bank_id": bank_id,
-            #                 "agent_id": None,
-            #                 "user": request.user
-            #             }
-            #         )
-
-            #         if not created:
-            #             # 🔄 Mise à jour du paiement existant
-            #             paiement.paid_amount += p["paid_amount"]
-            #             paiement.remaining_amount = max(0, p["due_amount"] - paiement.paid_amount)
-            #             paiement.due_amount = p["due_amount"]  # au cas où le montant dû change
-            #             paiement.bank_id = bank_id
-            #             paiement.user = request.user
-            #             paiement.save()
-
             if not agent_id:
                 created_transactions = []
 
@@ -485,104 +404,6 @@ class PaiementViewSet(viewsets.ModelViewSet):
                         paiement.bank_id = bank_id
                         paiement.user = request.user
                         paiement.save()
-
-            # else:
-            #     # --- Paiement avec agent (plusieurs étudiants) ---
-            #     total_paid = (
-            #         sum(p["paid_amount"] for p in payments)
-            #         + sum(e["amount"] for e in extras)
-            #     )
-
-            #     # 🔹 Build description
-            #     month_part = (
-            #         f" الأشهر: {', '.join(p['month_name_ar'] for p in payments)}"
-            #         if payments else ""
-            #     )
-            #     extra_part = (
-            #         " + " + ", ".join(e["des"] for e in extras)
-            #         if extras else ""
-            #     )
-            #     description = f"الوكيل(ة) {agent_name}  دفع(ت) {month_part} {extra_part} "
-
-            #     receipt = Receipt.objects.create(
-            #         student=None,
-            #         agent_id=agent_id,
-            #         total_amount=total_paid,
-            #         receipt_date=timezone.now(),
-            #         created_by=request.user,
-            #         receipt_description=description
-            #     )
-
-            #     created_transactions = []
-            #     if payments:
-            #         txn = Transaction.objects.create(
-            #             student=None,
-            #             agent_id=agent_id,
-            #             month=', '.join(str(p["month"]) for p in payments) if payments else None,
-            #             due_amount=sum(p["due_amount"] for p in payments) if payments else 0,
-            #             paid_amount=total_paid,
-            #             remaining_amount=sum(p["remaining_amount"] for p in payments) if payments else 0,
-            #             date=timezone.now(),
-            #             description = f"الوكيل(ة) {agent_name} سدد(ت) الأشهر: {{ {', '.join(p['month_name_ar'] for p in payments)} }}",
-            #             bank_id=bank_id,
-            #             user=request.user
-            #         )
-            #         ReceiptPayment.objects.create(receipt=receipt, transaction=txn)
-            #         created_transactions.append(txn.id)
-
-            #     if extras:
-            #         for ex in extras:
-            #             txn = Transaction.objects.create(
-            #                 student=None,
-            #                 agent_id=agent_id,
-            #                 month=None,
-            #                 due_amount=0,
-            #                 paid_amount=ex["amount"],
-            #                 remaining_amount=0,
-            #                 date=timezone.now(),
-            #                 description = f"الوكيل(ة) {agent_name} سدد(ت) : {{ {ex['des']} }}",
-            #                 bank_id=bank_id,
-            #                 user=request.user
-            #             )
-            #             ReceiptPayment.objects.create(receipt=receipt, transaction=txn)
-            #             created_transactions.append(txn.id)
-
-
-            #     for p in payments:
-            #         student = Etudiant.objects.get(id=p["student"])
-
-            #         paiement, created = Paiement.objects.get_or_create(
-            #             etudiant=student,
-            #             academic_year_id=p.get("academic_year"),
-            #             month=p["month"],
-            #             defaults={
-            #                 "due_amount": Decimal(str(p["due_amount"])),
-            #                 "paid_amount": Decimal(str(p["paid_amount"])),
-            #                 "remaining_amount": max(
-            #                     Decimal('0.0'),
-            #                     Decimal(str(p["due_amount"])) - Decimal(str(p["paid_amount"]))
-            #                 ),
-            #                 "bank_id": bank_id,
-            #                 "agent_id": agent_id,
-            #                 "user": request.user
-            #             }
-            #         )
-
-            #         if not created:
-            #             # 🔄 Paiement existe déjà → mise à jour du montant
-            #             paiement.paid_amount += Decimal(str(p["paid_amount"]))
-            #             paiement.due_amount = Decimal(str(p["due_amount"]))
-            #             paiement.remaining_amount = max(
-            #                 Decimal('0.0'),
-            #                 paiement.due_amount - paiement.paid_amount
-            #             )
-            #             paiement.bank_id = bank_id
-            #             paiement.agent_id = agent_id
-            #             paiement.user = request.user
-            #             paiement.save()
-
-
-            #         created_transactions.append(txn.id)
 
             else:
                 # ================================
@@ -690,8 +511,6 @@ class PaiementViewSet(viewsets.ModelViewSet):
                         paiement.agent_id = agent_id
                         paiement.user = request.user
                         paiement.save()
-
-
 
         return Response({
             "message": "Paiement traité avec succès",
@@ -844,6 +663,7 @@ class GarantPaiementViewSet(viewsets.ModelViewSet):
 
             remaining_amount = max(0, total_due - total_paid)
             months_names = [MONTHS_AR.get(m, str(m)) for m in months]
+            months_str = ", ".join(str(p["month"]) for p in payments)
 
             # -------------------------------
             # 🔹 RECEIPT
@@ -865,7 +685,7 @@ class GarantPaiementViewSet(viewsets.ModelViewSet):
             txn = Transaction.objects.create(
                 garant=garant,
                 agent_id=None,
-                # month=", ".join(months),
+                month=months_str,
                 account_id=account_id,
                 description=f"الكافل(ة) {garant.name} سدد(ت) الأشهر: {{ {', '.join(months_names)} }}",
                 due_amount=total_due,
@@ -1211,6 +1031,79 @@ class MonthlyReportViewSet(viewsets.ModelViewSet):
             )
         return queryset
 
+    @action(detail=False, methods=['get'], url_path='bulk-get')
+    def bulk_get(self, request):
+        classe_id = request.query_params.get('classe')
+        month = request.query_params.get('month')
+        year = request.query_params.get('year')
+
+        # 1️⃣ التقارير الشهرية
+        reports = MonthlyReport.objects.filter(
+            student__classe_id=classe_id,
+            month=month,
+            year=year
+        )
+
+        # 2️⃣ الغياب الشهري (DailyAbsence)
+        month_d = MONTHS_AR_REVERSE.get(month)
+
+        absences = (
+            DailyAbsence.objects
+            .filter(
+                student__classe_id=classe_id,
+                date__month=month_d,
+                currentYear=year
+            )
+            .values('student_id')
+            .annotate(total_absence=Count('id'))
+        )
+
+        # 3️⃣ تحويل الغياب إلى dict
+        absence_map = {
+            a['student_id']: a['total_absence']
+            for a in absences
+        }
+
+        # 4️⃣ دمج البيانات
+        data = []
+        for report in reports:
+            serialized = MonthlyReportSerializer(report).data
+            serialized['absence'] = absence_map.get(report.student_id, 0)
+            data.append(serialized)
+
+        return Response(data)
+
+    @action(detail=False, methods=['post'], url_path='bulk-save')
+    def bulk_save(self, request):
+        reports = request.data  # liste
+        created = 0
+        updated = 0
+
+        with transaction.atomic():
+            for data in reports:
+                obj, is_created = MonthlyReport.objects.update_or_create(
+                    student_id=data['student'],
+                    month=data['month'],
+                    year=data['year'],
+                    defaults={
+                        'ahzab': data['ahzab'],
+                        'thmn': data['thmn'],
+                        'memorization_amount': data['memorization_amount'],
+                        'previous_level': data['previous_level'],
+                        'current_level': data['current_level'],
+                        'progress': data['progress'],
+                        'absence': data['absence'],
+                        'remarks': data['remarks'],
+                    }
+                )
+                created += int(is_created)
+                updated += int(not is_created)
+
+        return Response({
+            'created': created,
+            'updated': updated
+        }, status=status.HTTP_200_OK)
+
 class UtilisateurViewSet(viewsets.ModelViewSet):
     queryset = Utilisateur.objects.all()
     serializer_class = UtilisateurSerializer
@@ -1346,7 +1239,6 @@ def daily_absence_list(request):
 
     serializer = DailyAbsenceSerializer(queryset, many=True)
     return Response(serializer.data)
-
 
 @api_view(['GET'])
 def student_payments(request):
