@@ -190,8 +190,8 @@ class EtudiantViewSet(viewsets.ModelViewSet):
         user = self.request.user
 
         # admin général → كل الفروع
-        # if user.role and user.role.title == 'admin_m':
-        #     queryset = queryset.filter(branche__in=user.branches.all())
+        if user.role and user.role.title == 'admin_m':
+            queryset = queryset.filter(branche__in=user.branches.all())
 
 
         return queryset
@@ -852,6 +852,7 @@ class EmployeeViewSet(viewsets.ModelViewSet):
                 defaults={
                     "first_name": employee.full_name,
                     "role": employee.job,
+                    "classe": employee.classe,
                     "is_active": True,
                 }
             )
@@ -863,8 +864,6 @@ class EmployeeViewSet(viewsets.ModelViewSet):
             # ✅ Set ManyToMany AFTER save
             if employee.branche:
                 user.branches.set([employee.branche])
-            if employee.classe:
-                user.classe.set(employee.classe)
 
 
     @action(detail=True, methods=['post'], url_path='activate')

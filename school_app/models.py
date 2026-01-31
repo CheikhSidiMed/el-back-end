@@ -8,6 +8,7 @@ from django.utils import timezone
 from datetime import date
 from django.contrib.postgres.fields import JSONField 
 from django.db.models import JSONField
+from django.db.models import Max
 
 def get_default_academic_year():
     return AcademicYear.objects.order_by('-start_date').first()
@@ -303,7 +304,7 @@ class DailyAbsence(models.Model):
         return f"{self.student.full_name} - {self.date} ({self.get_session_display()})"
 
 class Employee(models.Model):
-    number = models.CharField(max_length=50, unique=True)  # matricule ou code employé
+    number = models.CharField(max_length=50, unique=True, blank=True, null=True)  # matricule ou code employé
     full_name = models.CharField(max_length=200)
     balance = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
     phone = models.CharField(max_length=30, blank=True, null=True)
@@ -329,6 +330,23 @@ class Employee(models.Model):
     subscription_date = models.DateField()
     is_actif = models.BooleanField(default=True) 
     id_number = models.CharField(max_length=100, blank=True, null=True)
+
+    def save(self, *args, **kwargs):
+        if not self.number:
+            last_number = (
+                Employee.objects
+                .exclude(number__isnull=True)
+                .exclude(number="")
+                .aggregate(max_num=Max('number'))
+                ['max_num']
+            )
+
+            if last_number and last_number.isdigit():
+                self.number = str(int(last_number) + 1)
+            else:
+                self.number = "1"
+
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return f"{self.full_name} ({self.number})"
