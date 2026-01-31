@@ -80,6 +80,7 @@ class Utilisateur(AbstractUser):
         related_name='utilisateur'
     )
     branches = models.ManyToManyField(Branche, blank=True)
+    classe = models.ForeignKey('Classe', on_delete=models.SET_NULL, null=True, blank=True, related_name='user_class')
     phone = models.CharField(max_length=15, unique=True, null=True, blank=True)
 
     username = None
@@ -162,9 +163,9 @@ class Etudiant(models.Model):
     level = models.ForeignKey('Niveau', null=True, blank=True, on_delete=models.SET_NULL)
 
     rewaya = models.CharField(max_length=50, null=True, blank=True)
-    days = models.CharField(max_length=100, null=True, blank=True)
-    tdate = models.DateField(null=True, blank=True)
-    start = models.DateField(null=True, blank=True)
+    days = models.CharField(max_length=200, null=True, blank=True)
+    tdate = models.CharField(max_length=60, null=True, blank=True)
+    start = models.CharField(max_length=200, null=True, blank=True)
 
     is_active = models.BooleanField(default=True)
     elmoutoune = models.CharField(max_length=20, null=True, blank=True)

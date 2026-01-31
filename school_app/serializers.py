@@ -418,6 +418,7 @@ class UtilisateurSerializer(serializers.ModelSerializer):
             'password',
             'role',
             'role_id',
+            'classe',
             'branches',
             'branch_ids',
             'created_at'

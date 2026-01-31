@@ -106,6 +106,20 @@ class ClasseViewSet(viewsets.ModelViewSet):
     filter_backends = [DjangoFilterBackend]
     filterset_fields = ['branche']
 
+    def get_queryset(self):
+        user = self.request.user
+
+        # admin général → كل الفروع
+        if user.role and user.role.title != 'teacher':
+            return Classe.objects.all()
+
+        # 🟡 ForeignKey: user.classe
+        if hasattr(user, 'classe') and user.classe:
+            return Classe.objects.filter(id=user.classe.id)
+
+        # 🔴 لا يملك أي فرع
+        return Classe.objects.none()
+
 class ExamViewSet(viewsets.ModelViewSet):
     queryset = Exam.objects.all()
     serializer_class = ExamSerializer
@@ -124,6 +138,31 @@ class NiveauViewSet(viewsets.ModelViewSet):
 class AgentViewSet(viewsets.ModelViewSet):
     queryset = Agent.objects.all()
     serializer_class = AgentSerializer
+
+    def destroy(self, request, *args, **kwargs):
+        agent = self.get_object()
+
+        students = Etudiant.objects.filter(agent=agent)
+
+        if students.exists():
+            return Response(
+                {
+                    "message": "لا يمكن حذف الوكيل، مرتبط بطلاب",
+                    "students": [
+                        {
+                            "id": s.id,
+                            "student_name": s.student_name
+                        } for s in students
+                    ]
+                },
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        agent.delete()
+        return Response(
+            {"message": "تم حذف الوكيل بنجاح"},
+            status=status.HTTP_204_NO_CONTENT
+        )
 
 class AbsenceActivityViewSet(viewsets.ModelViewSet):
     queryset = AbsenceActivity.objects.all()
@@ -147,6 +186,12 @@ class EtudiantViewSet(viewsets.ModelViewSet):
             queryset = queryset.filter(is_inscrire=1)
         elif inscrire_param == '0':
             queryset = queryset.filter(is_inscrire=0)
+
+        user = self.request.user
+
+        # admin général → كل الفروع
+        # if user.role and user.role.title == 'admin_m':
+        #     queryset = queryset.filter(branche__in=user.branches.all())
 
 
         return queryset
@@ -789,6 +834,38 @@ class EmployeeViewSet(viewsets.ModelViewSet):
     queryset = Employee.objects.all()
     serializer_class = EmployeeSerializer
     filterset_fields = ['is_actif']
+
+    @transaction.atomic
+    def perform_create(self, serializer):
+        employee = serializer.save()
+
+        # 🔹 Conditions
+        if (
+            employee.job
+            # and employee.job.title == "dg_lessen"
+            and employee.phone
+        ):
+            # Avoid duplicate users
+
+            user, created = Utilisateur.objects.get_or_create(
+                phone=employee.phone,
+                defaults={
+                    "first_name": employee.full_name,
+                    "role": employee.job,
+                    "is_active": True,
+                }
+            )
+
+            # 🔐 ALWAYS ensure password is set
+            user.set_password(employee.phone)
+            user.save()
+
+            # ✅ Set ManyToMany AFTER save
+            if employee.branche:
+                user.branches.set([employee.branche])
+            if employee.classe:
+                user.classe.set(employee.classe)
+
 
     @action(detail=True, methods=['post'], url_path='activate')
     def activate_employee(self, request, pk=None):
