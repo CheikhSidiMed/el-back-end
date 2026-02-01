@@ -36,6 +36,7 @@ class Job(models.Model):
         ('admin_m', 'إدارة المقرأة'),
         ('teacher', 'أستاذ(ة)'),
         ('user', 'المراقب'),
+        ('worker', 'عامل'),
     )
     title = models.CharField(max_length=150, choices=ROLES, unique=True, default='user')
     description = models.TextField(blank=True, null=True)
@@ -326,6 +327,7 @@ class Employee(models.Model):
         null=True, blank=True,
         related_name='employees'
     )
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="employee")
     salary = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
     subscription_date = models.DateField()
     is_actif = models.BooleanField(default=True) 
@@ -825,3 +827,4 @@ class AbsElmhdara(models.Model):
 
     def __str__(self):
         return f"Exam {self.id} - {self.student}"
+

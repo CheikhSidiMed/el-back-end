@@ -842,7 +842,7 @@ class EmployeeViewSet(viewsets.ModelViewSet):
         # 🔹 Conditions
         if (
             employee.job
-            # and employee.job.title == "dg_lessen"
+            and employee.job.title != "worker"
             and employee.phone
         ):
             # Avoid duplicate users
@@ -852,19 +852,21 @@ class EmployeeViewSet(viewsets.ModelViewSet):
                 defaults={
                     "first_name": employee.full_name,
                     "role": employee.job,
-                    "classe": employee.classe,
                     "is_active": True,
                 }
             )
 
             # 🔐 ALWAYS ensure password is set
             user.set_password(employee.phone)
+            user.classe = employee.classe
+
             user.save()
 
             # ✅ Set ManyToMany AFTER save
             if employee.branche:
                 user.branches.set([employee.branche])
-
+            employee.user = user
+            employee.save()
 
     @action(detail=True, methods=['post'], url_path='activate')
     def activate_employee(self, request, pk=None):
@@ -902,6 +904,9 @@ class EmployeeViewSet(viewsets.ModelViewSet):
         # 🔹 Mise à jour
         employee.is_actif = True
         employee.subscription_date = new_date
+        if employee.user:
+            employee.user.is_active = True
+            employee.user.save(update_fields=["is_active"])
         employee.save(update_fields=["is_actif", "subscription_date"])
 
         return Response(
@@ -972,6 +977,9 @@ class EmployeeViewSet(viewsets.ModelViewSet):
             with transaction.atomic():
                 employee.balance = total_due
                 employee.is_actif = False
+                if employee.user:
+                    employee.user.is_active = False
+                    employee.user.save(update_fields=["is_active"])
                 employee.save(update_fields=["balance", "is_actif"])
 
             return Response({
