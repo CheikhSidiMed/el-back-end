@@ -42,6 +42,10 @@ router.register(r'absence-activitys', AbsenceActivityViewSet, basename="absence-
 router.register(r'exams', ExamViewSet, basename="exam")
 router.register(r'abs-elmhdaras', AbsElmhdaraViewSet, basename="abs-elmhdara")
 
+router.register(r'sabak-qurras', SabakQurraViewSet, basename="sabak-qurra")
+router.register(r'sabak-hakams', SabakHakamViewSet, basename="sabak-hakam")
+router.register(r'evaluations', EvaluationViewSet, basename="evaluation")
+
 urlpatterns = [
     path('', include(router.urls)),
     path('api/daily-absence/par-month', daily_absence_list, name='daily-absence-by-month'),

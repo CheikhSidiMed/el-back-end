@@ -1,7 +1,7 @@
 from django.shortcuts import render
 from rest_framework import viewsets
 from rest_framework.response import Response
-from .models import Branche, Classe, Niveau, Agent, Receipt, SalaryPayment, ReceiptPayment, Exam, AbsElmhdara, Job, Inscription, Garant, GarantPaiement, Employee, Transaction, Etudiant, Mois, Paiement, BankAccount, Receipt, ReceiptPayment, Utilisateur, Activity, AcademicYear, MonthlyReport, DailyAbsence, AccountCategory, Account, Permission, Suspension, AbsenceActivity
+from .models import Branche, Classe, Niveau, Agent, Receipt, SalaryPayment, ReceiptPayment, Exam, AbsElmhdara, Job, Inscription, Garant, GarantPaiement, Employee, Transaction, Etudiant, Mois, Paiement, BankAccount, Receipt, ReceiptPayment, Utilisateur, Activity, AcademicYear, MonthlyReport, DailyAbsence, AccountCategory, Account, Permission, Suspension, AbsenceActivity, SabakQurra, Evaluation, SabakHakam
 from .serializers import *
 from rest_framework_simplejwt.views import TokenObtainPairView
 from django.db import transaction
@@ -33,6 +33,8 @@ from rest_framework import filters
 from django.db import transaction as db_transaction
 from .filters import UtilisateurFilter
 from rest_framework.permissions import AllowAny
+from django.db.models import Avg
+
 
 MONTHS_AR_REVERSE = {
     "يناير": 1,
@@ -68,6 +70,17 @@ ARABIC_MONTHS = [
     "يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو",
     "يوليو", "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر"
 ]
+
+def calc_score(e):
+    return round(
+        e.personality +
+        e.voice +
+        e.performance +
+        e.memorization,
+        2
+    )
+
+
 
 class BrancheViewSet(viewsets.ModelViewSet):
     serializer_class = BrancheSerializer
@@ -1304,6 +1317,152 @@ class ClasseEffectifAPIView(APIView):
             "totals": nombre_inscrits
         })
 
+class SabakQurraViewSet(viewsets.ModelViewSet):
+    queryset = SabakQurra.objects.all()
+    serializer_class = SabakQurraSerializer
+    # filterset_fields = ['is_actif']
+
+    @action(detail=True, methods=['get'])
+    def sabak_classement(sabak_id):
+        return (
+            Evaluation.objects
+            .filter(
+                sabak_id=sabak_id,
+                etudiant__is_active=True,
+                etudiant__etat='inscrit'
+            )
+            .values(
+                'etudiant__id',
+                'etudiant__student_name'
+            )
+            .annotate(
+                final_score=(
+                    Avg('personality') +
+                    Avg('voice') +
+                    Avg('performance') +
+                    Avg('memorization')
+                )
+            )
+            .order_by('-final_score')
+        )
+
+class SabakHakamViewSet(viewsets.ModelViewSet):
+    queryset = SabakHakam.objects.all()
+    serializer_class = SabakHakamSerializer
+    # filterset_fields = ['is_actif']
+
+    @action(detail=False, methods=['post'], url_path='hakams')
+    def assign_hakams(self, request):
+        hakams = request.data.get('hakams', [])
+        sabak_id = request.data.get('sabak')
+
+        if not hakams:
+            return Response(
+                {'error': 'يجب اختيار حكم واحد على الأقل'},
+                status=400
+            )
+
+        created = []
+        for hakam_id in hakams:
+            
+            obj, _ = SabakHakam.objects.get_or_create(
+                sabak_id=sabak_id,
+                user_id=hakam_id
+            )
+            created.append(obj)
+
+        serializer = SabakHakamSerializer(
+            created,
+            many=True
+        )
+
+        return Response(serializer.data, status=201)
+
+    # 🔹 GET : récupérer hakams d’un sabak
+    @action(detail=True, methods=['get'], url_path='hakams')
+    def get_hakams(self, request, pk=None):
+        sabak_id = pk
+
+        qs = SabakHakam.objects.filter(sabak_id=sabak_id).select_related('user') 
+        serializer = self.get_serializer(qs, many=True)
+
+        return Response(serializer.data)
+
+
+
+class EvaluationViewSet(viewsets.ModelViewSet):
+    queryset = Evaluation.objects.all()
+    serializer_class = EvaluationSerializer
+    permission_classes = [IsAuthenticated]
+    # filterset_fields = ['is_actif']
+    def perform_create(self, serializer):
+        user = self.request.user
+        sabak = serializer.validated_data['sabak']
+
+        try:
+            SabakHakam.objects.get(
+                sabak=sabak,
+                user=user
+            )
+        except SabakHakam.DoesNotExist:
+            raise serializers.ValidationError(
+                {"detail": "Vous n'êtes pas hakam pour ce sabak"}
+            )
+        serializer.save(hakam=user)
+
+    @action(detail=False, methods=['get'], url_path='excel/(?P<sabak_id>[^/.]+)')
+    def excel_format(self, request, sabak_id=None):
+
+        evaluations = (
+            Evaluation.objects
+            .filter(sabak_id=sabak_id)
+            .select_related('hakam', 'etudiant')
+            .order_by('etudiant_id', 'created_at')
+        )
+
+        data = {}
+
+        for e in evaluations:
+            etu_id = e.etudiant_id
+
+            if etu_id not in data:
+
+                data[etu_id] = {
+                    "id": etu_id,
+                    "sabak": e.sabak_id,
+                    "etudiant": etu_id,
+                    "etudiant_name": e.etudiant.student_name,
+                    "class": e.etudiant.classe.nom if e.etudiant.classe else None,
+                    "total_score": 0,
+                }
+
+            row = data[etu_id]
+            idx = sum(1 for k in row if k.startswith("hakam_")) // 6 + 1
+
+            if idx > 3:
+                continue  # max 3 hakams
+
+            score = calc_score(e)
+            
+            row[f"hakam_{idx}_name"] = e.hakam.first_name if e.hakam else None
+            row[f"hakam_{idx}_personality"] = e.personality
+            row[f"hakam_{idx}_voice"] = e.voice
+            row[f"hakam_{idx}_performance"] = e.performance
+            row[f"hakam_{idx}_memorization"] = e.memorization
+            row[f"hakam_{idx}_score"] = score
+
+        # calcul total_score = moyenne des hakams
+        for row in data.values():
+            scores = [
+                row.get(f"hakam_{i}_score")
+                for i in (1, 2, 3)
+                if row.get(f"hakam_{i}_score") is not None
+            ]
+            row["total_score"] = round(sum(scores) / len(scores), 2) if scores else 0
+            row["totale_scores"] = sum(scores) if scores else 0
+
+        return Response(list(data.values()))
+
 
 @api_view(['GET'])
 def daily_absence_list(request):
@@ -1323,6 +1482,7 @@ def daily_absence_list(request):
 
     serializer = DailyAbsenceSerializer(queryset, many=True)
     return Response(serializer.data)
+
 
 @api_view(['GET'])
 def student_payments(request):
@@ -1352,7 +1512,7 @@ def student_payments(request):
 
     registration_date = student.date_inscription
     registration_year = registration_date.year
-    year_selected = int(academic_year.name)  # <-- Utilisation de name
+    year_selected = int(academic_year.name)
 
     result = []
 
@@ -1466,16 +1626,16 @@ def unpaid_months_until_suspend(request):
     if suspend_date <= student.date_inscription:
         return Response({"error": "Suspend before inscription"}, status=400)
 
-    arabic_months = [
+    ARABIC_MONTHS = [
         'يناير','فبراير','مارس','أبريل','مايو','يونيو',
         'يوليو','أغسطس','سبتمبر','أكتوبر','نوفمبر','ديسمبر'
     ]
 
     unpaid = []
 
-    # 🔑 toutes les années scolaires concernées
     academic_years = AcademicYear.objects.filter(
-        start_date__lte=suspend_date
+        start_date__lte=suspend_date,
+        end_date__gte=student.date_inscription
     ).order_by('start_date')
 
     for academic_year in academic_years:
@@ -1489,74 +1649,38 @@ def unpaid_months_until_suspend(request):
             p['month']: Decimal(p['paid_amount']) for p in payments
         }
 
-        academic_year_start = academic_year.start_date.year
-        academic_year_end = academic_year.end_date.year
+        year_start = academic_year.start_date
+        year_end = academic_year.end_date
 
-        same_year = academic_year_start <= student.date_inscription.year <= academic_year_end
-        registration_month = student.date_inscription.month
-        registration_day = student.date_inscription.day
+        current_date = max(student.date_inscription, year_start)
+        last_date = min(suspend_date, year_end)
 
-        for month in range(1, 13):
+        # نبدأ من أول شهر فعلي
+        cursor = date(current_date.year, current_date.month, 1)
 
-            month_start = date(academic_year_start, month, 1)
-            
-            # ❌ mois après suspension
-            if month_start >= suspend_date.replace(day=1) and academic_year_start == suspend_date.year and month > suspend_date.month:
-                continue
+        while cursor <= last_date.replace(day=1):
 
-            # ============================
-            # AVANT inscription
-            # ============================
-            if same_year and month < registration_month:
-                due_amount = Decimal("0.00")
+            month = cursor.month
+            year = cursor.year
+            days_in_month = monthrange(year, month)[1]
 
-            # ============================
-            # Cas spécial : inscription ET suspension le même mois
-            # ============================
-            elif (
-                same_year
-                and month == registration_month
-                and month == suspend_date.month
-            ):
-                days = monthrange(academic_year_start, month)[1]
+            # -----------------------
+            # حساب المبلغ المستحق
+            # -----------------------
 
-                days_present = suspend_date.day - registration_day  # ⚠️ jour suspension exclu
-
-                # sécurité
-                if days_present < 0:
-                    days_present = 0
-
-                proportion = Decimal(days_present) / Decimal(days)
+            # شهر التسجيل
+            if cursor.year == student.date_inscription.year and cursor.month == student.date_inscription.month:
+                days_present = days_in_month - student.date_inscription.day + 1
+                proportion = Decimal(days_present) / Decimal(days_in_month)
                 due_amount = (full_month_fee * proportion).quantize(Decimal("0.01"))
 
-            # ============================
-            # MOIS inscription
-            # ============================
-            elif same_year and month == registration_month:
-                days = monthrange(academic_year_start, month)[1]
-                proportion = Decimal(days - registration_day + 1) / Decimal(days)
+            # شهر الإيقاف
+            elif cursor.year == suspend_date.year and cursor.month == suspend_date.month:
+                days_present = suspend_date.day - 1
+                proportion = Decimal(days_present) / Decimal(days_in_month)
                 due_amount = (full_month_fee * proportion).quantize(Decimal("0.01"))
 
-
-            # ============================
-            # MOIS suspension (⚠️ jour exclu)
-            # ============================
-
-            elif (
-                (academic_year.start_date.year == suspend_date.year
-                or academic_year.end_date.year == suspend_date.year)
-                and month == suspend_date.month
-            ):
-                paid_amount = payments_dict.get(month, Decimal("0.00"))
-
-                days = monthrange(academic_year_start, month)[1]
-                days_present = suspend_date.day - 1  # ⚠️ jour exclu
-                proportion = Decimal(days_present) / Decimal(days)
-                due_amount = (full_month_fee * proportion).quantize(Decimal("0.01"))
-
-            # ============================
-            # MOIS normal
-            # ============================
+            # شهر عادي
             else:
                 due_amount = full_month_fee
 
@@ -1567,11 +1691,17 @@ def unpaid_months_until_suspend(request):
                 unpaid.append({
                     "academic_year": academic_year.year,
                     "month": month,
-                    "month_name_ar": arabic_months[month - 1],
+                    "month_name_ar": ARABIC_MONTHS[month - 1],
                     "due_amount": float(due_amount),
                     "paid_amount": float(paid_amount),
                     "remaining_amount": float(remaining)
                 })
+
+            # الشهر التالي
+            if month == 12:
+                cursor = date(year + 1, 1, 1)
+            else:
+                cursor = date(year, month + 1, 1)
 
     return Response({
         "student_id": student.id,

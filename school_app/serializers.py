@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Branche, Classe, Niveau, Agent, Etudiant, Mois, Exam, Paiement, Inscription, Garant, GarantPaiement, SalaryPayment, Employee, Job, BankAccount, Receipt, ReceiptPayment, Utilisateur, Activity, AcademicYear, MonthlyReport, DailyAbsence, AccountCategory, Account, Transaction, Permission, Suspension, AbsenceActivity, AbsElmhdara
+from .models import Branche, Classe, Niveau, Agent, Etudiant, Mois, Exam, Paiement, Inscription, Garant, GarantPaiement, SalaryPayment, Employee, Job, BankAccount, Receipt, ReceiptPayment, Utilisateur, Activity, AcademicYear, MonthlyReport, DailyAbsence, AccountCategory, Account, Transaction, Permission, Suspension, AbsenceActivity, AbsElmhdara, SabakQurra, Evaluation, SabakHakam
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
 
@@ -39,7 +39,6 @@ class ActivitySerializer(serializers.ModelSerializer):
         model = Activity
         fields = '__all__'
 
-
 class EmployeeSerializer(serializers.ModelSerializer):
     branche = BrancheSerializer(read_only=True)
     branche_id = serializers.PrimaryKeyRelatedField(
@@ -62,7 +61,6 @@ class EmployeeSerializer(serializers.ModelSerializer):
 
         return employee
 
-
 class ClasseSerializer(serializers.ModelSerializer):
     employees = EmployeeSerializer(many=True, read_only=True)  # relation reverse
 
@@ -79,7 +77,6 @@ class ClasseSerializer(serializers.ModelSerializer):
     class Meta:
         model = Classe
         fields = ['id', 'nom', 'niveau', 'branche', 'branche_id', 'employees']
-
 
 class EtudiantSerializer(serializers.ModelSerializer):
     level = NiveauSerializer(read_only=True)
@@ -161,28 +158,6 @@ class SalaryPaymentSerializer(serializers.ModelSerializer):
         model = SalaryPayment
         fields = '__all__'
 
-# class PermissionSerializer(serializers.ModelSerializer):
-#     children = serializers.SerializerMethodField()
-
-#     class Meta:
-#         model = Permission
-#         fields = ['id', 'code', 'label', 'parent', 'children']
-
-#     def get_children(self, obj):
-#         job_permissions = self.context.get('job_permissions')
-
-#         if not job_permissions:
-#             return []
-
-#         # فقط الأطفال الممنوحون فعليًا
-#         children = obj.children.filter(id__in=job_permissions)
-
-#         return PermissionSerializer(
-#             children,
-#             many=True,
-#             context=self.context
-#         ).data
-
 class PermissionSerializer(serializers.ModelSerializer):
     children = serializers.SerializerMethodField()
 
@@ -203,36 +178,6 @@ class PermissionSerializer(serializers.ModelSerializer):
             many=True,
             context=self.context
         ).data
-
-
-# class JobSerializer(serializers.ModelSerializer):
-#     permissions = PermissionSerializer(many=True, read_only=True)
-#     permission_ids = serializers.PrimaryKeyRelatedField(
-#         queryset=Permission.objects.all(),
-#         many=True,
-#         write_only=True,
-#         source='permissions'
-#     )
-
-#     class Meta:
-#         model = Job
-#         fields = [
-#             'id',
-#             'title',
-#             'description',
-#             'permissions',      # للعرض
-#             'permission_ids',   # للإضافة
-#         ]
-#     def get_permissions(self, obj):
-#         job_permissions = obj.permissions.values_list('id', flat=True)
-
-#         roots = obj.permissions.filter(parent__isnull=True)
-
-#         return PermissionSerializer(
-#             roots,
-#             many=True,
-#             context={'job_permissions': job_permissions}
-#         ).data
 
 class JobSerializer(serializers.ModelSerializer):
     permissions = serializers.SerializerMethodField()
@@ -359,39 +304,6 @@ class UtilisateurRegisterSerializer(serializers.ModelSerializer):
         user.save()
         return user
 
-# class UtilisateurSerializer(serializers.ModelSerializer):
-#     role = JobSerializer(read_only=True)
-#     role_id = serializers.PrimaryKeyRelatedField(
-#         queryset=Job.objects.all(),
-#         source="role",
-#         write_only=True
-#     )
-    
-#     class Meta:
-#         model = Utilisateur
-#         fields = ['id', 'phone', 'role', 'role_id', 'first_name', 'password', 'created_at']
-#         extra_kwargs = {
-#             'password': {'write_only': True, 'required': False},
-#             'created_at': {'read_only': True}
-#         }
-
-#     def create(self, validated_data):
-#         password = validated_data.pop('password', None)
-#         user = Utilisateur(**validated_data)
-#         if password:
-#             user.set_password(password)
-#         user.save()
-#         return user
-
-#     def update(self, instance, validated_data):
-#         password = validated_data.pop('password', None)
-#         for attr, value in validated_data.items():
-#             setattr(instance, attr, value)
-#         if password:
-#             instance.set_password(password)
-#         instance.save()
-#         return instance
-
 class UtilisateurSerializer(serializers.ModelSerializer):
     role = JobSerializer(read_only=True)
     role_id = serializers.PrimaryKeyRelatedField(
@@ -459,7 +371,6 @@ class UtilisateurSerializer(serializers.ModelSerializer):
 
         return instance
 
-
 class BankTransferSerializer(serializers.Serializer):
     source_bank_id = serializers.IntegerField()
     destination_bank_id = serializers.IntegerField()
@@ -495,7 +406,6 @@ class AcademicYearSerializer(serializers.ModelSerializer):
         model  = AcademicYear
         fields = ("id", "year", "name", "start_date", "end_date")
 
-
 class PaiementSerializer(serializers.ModelSerializer):
     agent = AgentSerializer(read_only=True)
     agent_id = serializers.PrimaryKeyRelatedField(
@@ -520,7 +430,6 @@ class PaiementSerializer(serializers.ModelSerializer):
     class Meta:
         model = Paiement
         fields = '__all__'
-
 
 class UnpaidMonthSerializer(serializers.Serializer):
     academic_year = serializers.CharField()
@@ -559,4 +468,50 @@ class SuspensionSerializer(serializers.ModelSerializer):
 
 class ReactivateSuspensionSerializer(serializers.Serializer):
     reactivation_reason = serializers.CharField(required=False, allow_blank=True)
+
+class SabakQurraSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = SabakQurra
+        fields = '__all__'
+
+class SabakHakamSerializer(serializers.ModelSerializer):
+    last_name = serializers.CharField(source='user.first_name', read_only=True)
+
+    class Meta:
+        model = SabakHakam
+        fields = ['id', 'created_at', 'sabak', 'user', 'last_name']
+
+
+class EvaluationSerializer(serializers.ModelSerializer):
+    last_name = serializers.CharField(source='hakam.first_name', read_only=True)
+
+    class Meta:
+        model = Evaluation
+        fields = [
+            'id', 
+            'created_at', 
+            'sabak', 
+            'etudiant', 
+            'hakam', 
+            'personality', 
+            'voice', 
+            'performance', 
+            'memorization', 
+            'level', 
+            'last_name'
+            ]
+        read_only_fields = ['hakam', 'created_at']
+
+    def validate_etudiant(self, etudiant):
+        if not etudiant.is_active:
+            raise serializers.ValidationError(
+                "Cet étudiant n'est pas actif."
+            )
+
+        if etudiant.etat != 'inscrit':
+            raise serializers.ValidationError(
+                "Cet étudiant n'est pas inscrit."
+            )
+
+        return etudiant
 

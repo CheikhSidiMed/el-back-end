@@ -37,6 +37,7 @@ class Job(models.Model):
         ('teacher', 'أستاذ(ة)'),
         ('user', 'المراقب'),
         ('worker', 'عامل'),
+        ('hakam', 'حكم'),
     )
     title = models.CharField(max_length=150, choices=ROLES, unique=True, default='user')
     description = models.TextField(blank=True, null=True)
@@ -397,7 +398,11 @@ class BankAccount(models.Model):
     balance = models.DecimalField(max_digits=13, decimal_places=2, default=0)
     category = models.CharField(choices=CATEGORY, null=True, blank=True, default=1)
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name='bank_accounts')
-    
+        
+    class Meta:
+        ordering = ['id']
+        # ordering = ['-id'] 
+
     def __str__(self):
         return f"{self.bank_name} - {self.account_number}"
 
@@ -457,12 +462,11 @@ class Inscription(models.Model):
         return f"{self.student} → {self.activity} ({self.montant})"
 
 class Garant(models.Model):
-
     name = models.CharField(max_length=150)
     phone = models.CharField(max_length=20)
     montant = models.DecimalField(max_digits=8, decimal_places=2)
     balance = models.DecimalField(max_digits=8, decimal_places=2, default=0)
-    date_c = models.DateField(default=timezone.now)
+    date_c = models.DateField(auto_now_add=True)
     account = models.ForeignKey(Account, on_delete=models.CASCADE)
 
     def __str__(self):
@@ -827,4 +831,92 @@ class AbsElmhdara(models.Model):
 
     def __str__(self):
         return f"Exam {self.id} - {self.student}"
+
+class SabakQurra(models.Model):
+    title = models.CharField(max_length=150)
+    description = models.TextField(blank=True, null=True)
+
+    start_date = models.DateField()
+    end_date = models.DateField()
+
+    is_active = models.BooleanField(default=True)
+    academic_year = models.ForeignKey(
+        AcademicYear, 
+        on_delete=models.CASCADE, 
+        related_name='sabak_qurra', 
+        default=get_default_academic_year 
+    )
+
+    def __str__(self):
+        return self.title
+
+class SabakHakam(models.Model):
+    sabak = models.ForeignKey(
+        SabakQurra,
+        on_delete=models.CASCADE,
+        related_name='hakams'
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name='hakams_user'
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+
+    class Meta:
+        unique_together = ('sabak', 'user')
+
+class Evaluation(models.Model):
+    # CHOICES = [
+    #     'الحافظ و المجازين',
+    #     '40-59 حزبا',
+    #     '1-15 حزبا',
+    #     'الأشبال',
+    # ],
+    CHOICES = [
+        ('الفرع الأول', 'الفرع الأول'),
+        ('الفرع الثاني', 'الفرع الثاني'),
+        ('الفرع الثالث', 'الفرع الثالث'),
+        ('الفرع الرابع', 'الفرع الرابع'),
+    ]
+
+    sabak = models.ForeignKey(
+        SabakQurra,
+        on_delete=models.CASCADE
+    )
+    etudiant = models.ForeignKey(
+        Etudiant,
+        on_delete=models.CASCADE,
+        related_name='evaluations'
+    )
+    hakam = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name='hakam_user'
+    )
+    # 🔹 4 critères
+    personality = models.PositiveIntegerField()
+    voice = models.PositiveIntegerField()
+    performance = models.PositiveIntegerField()
+    memorization = models.PositiveIntegerField()
+    level = models.CharField(
+        max_length=250,
+        choices=CHOICES,
+        default='الفرع الأول'
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('sabak', 'etudiant', 'hakam')
+
+    def total_score(self):
+        return (
+            self.personality +
+            self.voice +
+            self.performance +
+            self.memorization
+        )
 
