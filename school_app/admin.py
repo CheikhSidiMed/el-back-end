@@ -7,7 +7,8 @@ from .models import (
     Employee, Transaction, Etudiant, Mois, Paiement,
     BankAccount, Utilisateur, Activity, AcademicYear,
     MonthlyReport, DailyAbsence, AccountCategory, Account,
-    Permission, Suspension, AbsenceActivity
+    Permission, Suspension, AbsenceActivity, CompetitionLevel,
+    Competition, Tasfiya, Juge, Participant, Evaluation
 )
 
 admin.site.register(Branche)
@@ -37,3 +38,9 @@ admin.site.register(Account)
 admin.site.register(Permission)
 admin.site.register(Suspension)
 admin.site.register(AbsenceActivity)
+admin.site.register(Competition)
+admin.site.register(Tasfiya)
+admin.site.register(Juge)
+admin.site.register(Participant)
+admin.site.register(Evaluation)
+admin.site.register(CompetitionLevel)

@@ -1,14 +1,14 @@
 from django.shortcuts import render
 from rest_framework import viewsets
 from rest_framework.response import Response
-from .models import Branche, Classe, Niveau, Agent, Receipt, SalaryPayment, ReceiptPayment, Exam, AbsElmhdara, Job, Inscription, Garant, GarantPaiement, Employee, Transaction, Etudiant, Mois, Paiement, BankAccount, Receipt, ReceiptPayment, Utilisateur, Activity, AcademicYear, MonthlyReport, DailyAbsence, AccountCategory, Account, Permission, Suspension, AbsenceActivity, SabakQurra, Evaluation, SabakHakam
+from .models import Branche, Classe, Niveau, Agent, Receipt, SalaryPayment, ReceiptPayment, Exam, AbsElmhdara, Job, Inscription, Garant, GarantPaiement, Employee, Transaction, Etudiant, Mois, Paiement, BankAccount, Receipt, ReceiptPayment, Utilisateur, Activity, AcademicYear, MonthlyReport, DailyAbsence, AccountCategory, Account, Permission, Suspension, AbsenceActivity, Competition, Tasfiya, Juge, Participant, Evaluation, CompetitionLevel
 from .serializers import *
 from rest_framework_simplejwt.views import TokenObtainPairView
 from django.db import transaction
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.decorators import api_view, permission_classes, action
 
-from django.db.models import Sum, Count
+from django.db.models import Sum, Count, F
 from calendar import monthrange
 from collections import defaultdict
 from rest_framework.views import APIView
@@ -34,6 +34,7 @@ from django.db import transaction as db_transaction
 from .filters import UtilisateurFilter
 from rest_framework.permissions import AllowAny
 from django.db.models import Avg
+from django.db.models import Q
 
 
 MONTHS_AR_REVERSE = {
@@ -81,7 +82,6 @@ def calc_score(e):
     )
 
 
-
 class BrancheViewSet(viewsets.ModelViewSet):
     serializer_class = BrancheSerializer
     permission_classes = [IsAuthenticated]
@@ -103,15 +103,6 @@ class BrancheViewSet(viewsets.ModelViewSet):
 
         # 🔴 لا يملك أي فرع
         return Branche.objects.none()
-
-    # def get_queryset(self):
-        user = self.request.user
-
-        # Superuser → toutes les branches
-        if user.is_superuser:
-            return Branche.objects.all()
-
-        return user.branches.all()
 
 class ClasseViewSet(viewsets.ModelViewSet):
     queryset = Classe.objects.all()
@@ -844,9 +835,34 @@ class SuspensionViewSet(viewsets.ModelViewSet):
     serializer_class = SuspensionSerializer
 
 class EmployeeViewSet(viewsets.ModelViewSet):
-    queryset = Employee.objects.all()
+    # queryset = Employee.objects.all()
     serializer_class = EmployeeSerializer
+    permission_classes = [IsAuthenticated]
+
+    filter_backends = [DjangoFilterBackend]
     filterset_fields = ['is_actif']
+
+    def get_queryset(self):
+        user = self.request.user
+
+        # 🟢 Admin général → tous les employés
+        if user.role and user.role.title == 'admin_g':
+            return Employee.objects.all()
+
+        # 🟢 Si user a plusieurs branches (ManyToMany)
+        if hasattr(user, 'branches') and user.branches.exists():
+            return Employee.objects.filter(
+                branche__in=user.branches.all()
+            )
+
+        # 🟡 Si user a une seule branche (ForeignKey)
+        if hasattr(user, 'branche') and user.branche:
+            return Employee.objects.filter(
+                branch=user.branche
+            )
+
+        # 🔴 Aucun accès
+        return Employee.objects.none()
 
     @transaction.atomic
     def perform_create(self, serializer):
@@ -1036,20 +1052,10 @@ class SalaryPaymentViewSet(viewsets.ModelViewSet):
             qs = qs.filter(month=month)
         return qs
 
+
     @action(detail=False, methods=['post'], url_path='process')
     def process_month(self, request):
-        """
-        POST /api/salary-payments/process/
-        {
-          "year": "2025-2026",
-          "month": 3,
-          "employees": [
-              {"id": 1, "amount": 500000},
-              {"id": 2, "amount": 450000}
-          ]
-        }
-        ➤ Crée des salaires pour les employés sélectionnés uniquement.
-        """
+
         year_name = request.data.get("year")
         month = request.data.get("month")
         employees_data = request.data.get("employees", [])
@@ -1081,8 +1087,15 @@ class SalaryPaymentViewSet(viewsets.ModelViewSet):
                 emp_id = e.get("id")
                 amount = Decimal(str(e.get("amount", 0)))
 
+                if amount <= 0:
+                    skipped += 1
+                    continue
+
                 try:
-                    emp = Employee.objects.get(id=emp_id, is_actif=True)
+                    emp = Employee.objects.select_for_update().get(
+                        id=emp_id,
+                        is_actif=True
+                    )
                 except Employee.DoesNotExist:
                     skipped += 1
                     continue
@@ -1097,10 +1110,16 @@ class SalaryPaymentViewSet(viewsets.ModelViewSet):
                             "note": f"Paiement manuel mois {month}",
                         },
                     )
+
                     if created_flag:
+                        # ✅ Update employee balance safely (atomic)
+                        Employee.objects.filter(id=emp.id).update(
+                            balance=F('balance') + amount
+                        )
                         created += 1
                     else:
                         skipped += 1
+
                 except IntegrityError:
                     skipped += 1
 
@@ -1109,6 +1128,81 @@ class SalaryPaymentViewSet(viewsets.ModelViewSet):
             msg += f" تم تخطي {skipped} موظف (مسجل مسبقاً أو غير صالح)."
 
         return Response({"success": True, "message": msg})
+
+    # @action(detail=False, methods=['post'], url_path='process')
+    # def process_month(self, request):
+    #     """
+    #     POST /api/salary-payments/process/
+    #     {
+    #       "year": "2025-2026",
+    #       "month": 3,
+    #       "employees": [
+    #           {"id": 1, "amount": 500000},
+    #           {"id": 2, "amount": 450000}
+    #       ]
+    #     }
+    #     ➤ Crée des salaires pour les employés sélectionnés uniquement.
+    #     """
+    #     year_name = request.data.get("year")
+    #     month = request.data.get("month")
+    #     employees_data = request.data.get("employees", [])
+
+    #     if not year_name or not month:
+    #         return Response(
+    #             {"success": False, "message": "يجب تحديد السنة والشهر."},
+    #             status=status.HTTP_400_BAD_REQUEST,
+    #         )
+
+    #     try:
+    #         academic_year = AcademicYear.objects.get(year=year_name)
+    #     except AcademicYear.DoesNotExist:
+    #         return Response(
+    #             {"success": False, "message": "السنة الأكاديمية غير موجودة."},
+    #             status=status.HTTP_404_NOT_FOUND,
+    #         )
+
+    #     if not employees_data:
+    #         return Response(
+    #             {"success": False, "message": "لم يتم تحديد أي موظف."},
+    #             status=status.HTTP_400_BAD_REQUEST,
+    #         )
+
+    #     created, skipped = 0, 0
+
+    #     with transaction.atomic():
+    #         for e in employees_data:
+    #             emp_id = e.get("id")
+    #             amount = Decimal(str(e.get("amount", 0)))
+
+    #             try:
+    #                 emp = Employee.objects.get(id=emp_id, is_actif=True)
+    #             except Employee.DoesNotExist:
+    #                 skipped += 1
+    #                 continue
+
+    #             try:
+                    
+    #                 obj, created_flag = SalaryPayment.objects.get_or_create(
+    #                     employee=emp,
+    #                     academic_year=academic_year,
+    #                     month=month,
+    #                     defaults={
+    #                         "amount": amount,
+    #                         "note": f"Paiement manuel mois {month}",
+    #                     },
+    #                 )
+    #                 if created_flag:
+    #                     created += 1
+    #                 else:
+    #                     skipped += 1
+    #             except IntegrityError:
+    #                 skipped += 1
+
+    #     msg = f"تمت معالجة الرواتب لشهر {month} للسنة {year_name}."
+    #     if skipped:
+    #         msg += f" تم تخطي {skipped} موظف (مسجل مسبقاً أو غير صالح)."
+
+    #     return Response({"success": True, "message": msg})
        
 class MonthlyReportViewSet(viewsets.ModelViewSet):
     queryset = MonthlyReport.objects.all()
@@ -1317,151 +1411,336 @@ class ClasseEffectifAPIView(APIView):
             "totals": nombre_inscrits
         })
 
-class SabakQurraViewSet(viewsets.ModelViewSet):
-    queryset = SabakQurra.objects.all()
-    serializer_class = SabakQurraSerializer
-    # filterset_fields = ['is_actif']
 
-    @action(detail=True, methods=['get'])
-    def sabak_classement(sabak_id):
-        return (
-            Evaluation.objects
-            .filter(
-                sabak_id=sabak_id,
-                etudiant__is_active=True,
-                etudiant__etat='inscrit'
-            )
-            .values(
-                'etudiant__id',
-                'etudiant__student_name'
-            )
-            .annotate(
-                final_score=(
-                    Avg('personality') +
-                    Avg('voice') +
-                    Avg('performance') +
-                    Avg('memorization')
-                )
-            )
-            .order_by('-final_score')
-        )
+# class SabakQurraViewSet(viewsets.ModelViewSet):
+#     queryset = SabakQurra.objects.all()
+#     serializer_class = SabakQurraSerializer
+#     # filterset_fields = ['is_actif']
 
-class SabakHakamViewSet(viewsets.ModelViewSet):
-    queryset = SabakHakam.objects.all()
-    serializer_class = SabakHakamSerializer
-    # filterset_fields = ['is_actif']
+#     @action(detail=True, methods=['get'])
+#     def sabak_classement(sabak_id):
+#         return (
+#             Evaluation.objects
+#             .filter(
+#                 sabak_id=sabak_id,
+#                 etudiant__is_active=True,
+#                 etudiant__etat='inscrit'
+#             )
+#             .values(
+#                 'etudiant__id',
+#                 'etudiant__student_name'
+#             )
+#             .annotate(
+#                 final_score=(
+#                     Avg('personality') +
+#                     Avg('voice') +
+#                     Avg('performance') +
+#                     Avg('memorization')
+#                 )
+#             )
+#             .order_by('-final_score')
+#         )
 
-    @action(detail=False, methods=['post'], url_path='hakams')
-    def assign_hakams(self, request):
-        hakams = request.data.get('hakams', [])
-        sabak_id = request.data.get('sabak')
+# class SabakHakamViewSet(viewsets.ModelViewSet):
+#     queryset = SabakHakam.objects.all()
+#     serializer_class = SabakHakamSerializer
+#     # filterset_fields = ['is_actif']
 
-        if not hakams:
+#     @action(detail=False, methods=['post'], url_path='hakams')
+#     def assign_hakams(self, request):
+#         hakams = request.data.get('hakams', [])
+#         sabak_id = request.data.get('sabak')
+
+#         if not hakams:
+#             return Response(
+#                 {'error': 'يجب اختيار حكم واحد على الأقل'},
+#                 status=400
+#             )
+
+#         created = []
+#         for hakam_id in hakams:
+            
+#             obj, _ = SabakHakam.objects.get_or_create(
+#                 sabak_id=sabak_id,
+#                 user_id=hakam_id
+#             )
+#             created.append(obj)
+
+#         serializer = SabakHakamSerializer(
+#             created,
+#             many=True
+#         )
+
+#         return Response(serializer.data, status=201)
+
+#     # 🔹 GET : récupérer hakams d’un sabak
+#     @action(detail=True, methods=['get'], url_path='hakams')
+#     def get_hakams(self, request, pk=None):
+#         sabak_id = pk
+
+#         qs = SabakHakam.objects.filter(sabak_id=sabak_id).select_related('user') 
+#         serializer = self.get_serializer(qs, many=True)
+
+#         return Response(serializer.data)
+
+
+# class EvaluationViewSet(viewsets.ModelViewSet):
+#     queryset = Evaluation.objects.all()
+#     serializer_class = EvaluationSerializer
+#     permission_classes = [IsAuthenticated]
+#     # filterset_fields = ['is_actif']
+#     def perform_create(self, serializer):
+#         user = self.request.user
+#         sabak = serializer.validated_data['sabak']
+
+#         try:
+#             SabakHakam.objects.get(
+#                 sabak=sabak,
+#                 user=user
+#             )
+#         except SabakHakam.DoesNotExist:
+#             raise serializers.ValidationError(
+#                 {"detail": "Vous n'êtes pas hakam pour ce sabak"}
+#             )
+#         serializer.save(hakam=user)
+
+#     @action(detail=False, methods=['get'], url_path='excel/(?P<sabak_id>[^/.]+)')
+#     def excel_format(self, request, sabak_id=None):
+
+#         evaluations = (
+#             Evaluation.objects
+#             .filter(sabak_id=sabak_id)
+#             .select_related('hakam', 'etudiant')
+#             .order_by('etudiant_id', 'created_at')
+#         )
+
+#         data = {}
+
+#         for e in evaluations:
+#             etu_id = e.etudiant_id
+
+#             if etu_id not in data:
+
+#                 data[etu_id] = {
+#                     "id": etu_id,
+#                     "sabak": e.sabak_id,
+#                     "etudiant": etu_id,
+#                     "etudiant_name": e.etudiant.student_name,
+#                     "class": e.etudiant.classe.nom if e.etudiant.classe else None,
+#                     "total_score": 0,
+#                 }
+
+#             row = data[etu_id]
+#             idx = sum(1 for k in row if k.startswith("hakam_")) // 6 + 1
+
+#             if idx > 3:
+#                 continue  # max 3 hakams
+
+#             score = calc_score(e)
+            
+#             row[f"hakam_{idx}_name"] = e.hakam.first_name if e.hakam else None
+#             row[f"hakam_{idx}_personality"] = e.personality
+#             row[f"hakam_{idx}_voice"] = e.voice
+#             row[f"hakam_{idx}_performance"] = e.performance
+#             row[f"hakam_{idx}_memorization"] = e.memorization
+#             row[f"hakam_{idx}_score"] = score
+
+#         # calcul total_score = moyenne des hakams
+#         for row in data.values():
+#             scores = [
+#                 row.get(f"hakam_{i}_score")
+#                 for i in (1, 2, 3)
+#                 if row.get(f"hakam_{i}_score") is not None
+#             ]
+#             row["total_score"] = round(sum(scores) / len(scores), 2) if scores else 0
+#             row["totale_scores"] = sum(scores) if scores else 0
+
+#         return Response(list(data.values()))
+
+
+
+
+class CompetitionViewSet(viewsets.ModelViewSet):
+    queryset = Competition.objects.all()
+    serializer_class = CompetitionSerializer
+
+class TasfiyaViewSet(viewsets.ModelViewSet):
+    queryset = Tasfiya.objects.all()
+    serializer_class = TasfiyaSerializer
+
+class CompetitionLevelViewSet(viewsets.ModelViewSet):
+    queryset = CompetitionLevel.objects.all()
+    serializer_class = CompetitionLevelSerializer
+
+class JugeViewSet(viewsets.ModelViewSet):
+    queryset = Juge.objects.all()
+    serializer_class = JugeSerializer
+
+    @action(detail=False, methods=['post'], url_path='juges')
+    def assign_juges(self, request):
+        juges = request.data.get('juges', [])
+        competition_id = request.data.get('competition')
+
+        if not juges:
             return Response(
                 {'error': 'يجب اختيار حكم واحد على الأقل'},
                 status=400
             )
 
         created = []
-        for hakam_id in hakams:
+        for juge_id in juges:
             
-            obj, _ = SabakHakam.objects.get_or_create(
-                sabak_id=sabak_id,
-                user_id=hakam_id
+            obj, _ = Juge.objects.get_or_create(
+                competition_id=competition_id,
+                user_id=juge_id
             )
             created.append(obj)
 
-        serializer = SabakHakamSerializer(
+        serializer = JugeSerializer(
             created,
             many=True
         )
 
         return Response(serializer.data, status=201)
 
-    # 🔹 GET : récupérer hakams d’un sabak
-    @action(detail=True, methods=['get'], url_path='hakams')
-    def get_hakams(self, request, pk=None):
-        sabak_id = pk
+    # 🔹 GET : récupérer juges d’un competition
+    @action(detail=True, methods=['get'], url_path='juges')
+    def get_juges(self, request, pk=None):
+        competition_id = pk
 
-        qs = SabakHakam.objects.filter(sabak_id=sabak_id).select_related('user') 
+        qs = Juge.objects.filter(competition_id=competition_id).select_related('user') 
         serializer = self.get_serializer(qs, many=True)
 
         return Response(serializer.data)
 
-
+class ParticipantViewSet(viewsets.ModelViewSet):
+    queryset = Participant.objects.all()
+    serializer_class = ParticipantSerializer
 
 class EvaluationViewSet(viewsets.ModelViewSet):
     queryset = Evaluation.objects.all()
     serializer_class = EvaluationSerializer
     permission_classes = [IsAuthenticated]
-    # filterset_fields = ['is_actif']
+
     def perform_create(self, serializer):
         user = self.request.user
-        sabak = serializer.validated_data['sabak']
 
+        participant = serializer.validated_data.get('participant')
+        competition_id = self.request.data.get('competition')  # récupère depuis le payload
+        tasfiya = serializer.validated_data.get('tasfiya')
+
+        if not participant:
+            raise serializers.ValidationError({'participant': 'Ce champ est requis.'})
+        if not competition_id:
+            raise serializers.ValidationError({'competition': 'Ce champ est requis.'})
+
+        # Vérifier que le participant appartient bien à cette compétition
+        if participant.competition.id != int(competition_id):
+            raise serializers.ValidationError(
+                {"participant": "Le participant ne fait pas partie de cette compétition."}
+            )
+
+        # Vérifier que l'utilisateur est juge pour cette compétition
         try:
-            SabakHakam.objects.get(
-                sabak=sabak,
+            juge = Juge.objects.get(
+                competition_id=competition_id,
                 user=user
             )
-        except SabakHakam.DoesNotExist:
+        except Juge.DoesNotExist:
             raise serializers.ValidationError(
-                {"detail": "Vous n'êtes pas hakam pour ce sabak"}
+                {"detail": "Vous n'êtes pas juge pour cette compétition."}
             )
-        serializer.save(hakam=user)
 
-    @action(detail=False, methods=['get'], url_path='excel/(?P<sabak_id>[^/.]+)')
-    def excel_format(self, request, sabak_id=None):
+        serializer.save(juge=juge)
+
+
+    @action(detail=False, methods=['post'], url_path='excel')
+    def excel_format(self, request):
+        tasfiya_id = request.data.get("tasfiya_id")
+        level = request.data.get("level")
+
+        if not tasfiya_id or not level:
+            return Response(
+                {"detail": "tasfiya_id et level sont obligatoires."},
+                status=400
+            )
 
         evaluations = (
             Evaluation.objects
-            .filter(sabak_id=sabak_id)
-            .select_related('hakam', 'etudiant')
-            .order_by('etudiant_id', 'created_at')
+            .filter(
+                tasfiya_id=tasfiya_id,
+                participant__level_id=level
+            )
+            .select_related(
+                'juge',
+                'participant',
+                'participant__etudiant',
+                'participant__etudiant__classe'
+            )
+            .order_by('participant_id', 'juge_id')
         )
 
-        data = {}
+        result = {}
 
         for e in evaluations:
-            etu_id = e.etudiant_id
+            part_id = e.participant_id
 
-            if etu_id not in data:
-
-                data[etu_id] = {
-                    "id": etu_id,
-                    "sabak": e.sabak_id,
-                    "etudiant": etu_id,
-                    "etudiant_name": e.etudiant.student_name,
-                    "class": e.etudiant.classe.nom if e.etudiant.classe else None,
+            if part_id not in result:
+                result[part_id] = {
+                    "participant_id": part_id,
+                    "tasfiya": e.tasfiya_id,
+                    "etudiant": e.participant.etudiant_id,
+                    "etudiant_name": e.participant.etudiant.student_name,
+                    "class": (
+                        e.participant.etudiant.classe.nom
+                        if e.participant.etudiant.classe else None
+                    ),
                     "total_score": 0,
+                    "totale_scores": 0,
                 }
 
-            row = data[etu_id]
-            idx = sum(1 for k in row if k.startswith("hakam_")) // 6 + 1
+            row = result[part_id]
 
-            if idx > 3:
-                continue  # max 3 hakams
+            # Compter combien de juges déjà ajoutés
+            existing_judges = len([
+                k for k in row.keys() if k.startswith("juge_") and k.endswith("_score")
+            ])
 
-            score = calc_score(e)
-            
-            row[f"hakam_{idx}_name"] = e.hakam.first_name if e.hakam else None
-            row[f"hakam_{idx}_personality"] = e.personality
-            row[f"hakam_{idx}_voice"] = e.voice
-            row[f"hakam_{idx}_performance"] = e.performance
-            row[f"hakam_{idx}_memorization"] = e.memorization
-            row[f"hakam_{idx}_score"] = score
+            juge_index = existing_judges + 1
 
-        # calcul total_score = moyenne des hakams
-        for row in data.values():
+            if juge_index > 3:
+                continue  # max 3 juges
+
+            score = (
+                e.personality +
+                e.voice +
+                e.performance +
+                e.memorization
+            )
+
+            row[f"juge_{juge_index}_id"] = e.juge.id if e.juge else None
+            row[f"juge_{juge_index}_personality"] = e.personality
+            row[f"juge_{juge_index}_voice"] = e.voice
+            row[f"juge_{juge_index}_performance"] = e.performance
+            row[f"juge_{juge_index}_memorization"] = e.memorization
+            row[f"juge_{juge_index}_score"] = score
+
+        # Calcul moyenne
+        for row in result.values():
             scores = [
-                row.get(f"hakam_{i}_score")
+                row.get(f"juge_{i}_score")
                 for i in (1, 2, 3)
-                if row.get(f"hakam_{i}_score") is not None
+                if row.get(f"juge_{i}_score") is not None
             ]
-            row["total_score"] = round(sum(scores) / len(scores), 2) if scores else 0
-            row["totale_scores"] = sum(scores) if scores else 0
 
-        return Response(list(data.values()))
+            if scores:
+                row["totale_scores"] = sum(scores)
+                row["total_score"] = round(sum(scores) / len(scores), 2)
+            else:
+                row["totale_scores"] = 0
+                row["total_score"] = 0
+
+        return Response(list(result.values()))
 
 
 @api_view(['GET'])
@@ -1604,6 +1883,153 @@ def student_payments(request):
         })
 
     return Response(result)
+
+
+@api_view(['GET'])
+def student_by_level(request):
+    level_id = request.GET.get('level')
+
+    if not level_id:
+        return Response({"error": "Level is required"}, status=400)
+
+    students = Etudiant.objects.filter(
+        level_id=level_id,
+        is_inscrire=1,
+        etat='inscrit'
+    )
+
+    serializer = EtudiantSerializer(students, many=True)
+    return Response(serializer.data)
+
+
+@api_view(['GET'])
+def participants_by_competition(request):
+    competition_id = request.GET.get('competition')
+
+    if not competition_id:
+        return Response({"error": "competition is required"}, status=400)
+
+    participants = Participant.objects.filter(
+        competition_id=competition_id
+    )
+
+    serializer = ParticipantSerializer(participants, many=True)
+    return Response(serializer.data)
+
+
+@api_view(['GET'])
+def tasfiyats_by_competition(request):
+    competition_id = request.GET.get('competition')
+
+    if not competition_id:
+        return Response({"error": "competition is required"}, status=400)
+
+    tasfiyats = Tasfiya.objects.filter(
+        competition_id=competition_id
+    )
+
+    serializer = TasfiyaSerializer(tasfiyats, many=True)
+    return Response(serializer.data)
+
+
+@api_view(['GET'])
+def participants_autocomplete(request):
+    competition_id = request.GET.get('competition')
+    search = request.GET.get('search', '').strip()
+
+    if not competition_id:
+        return Response([], status=200)
+
+    queryset = Participant.objects.filter(
+        competition_id=competition_id,
+    ).select_related('etudiant', 'etudiant__agent')
+
+    if search:
+        queryset = queryset.filter(
+            Q(etudiant__student_name__icontains=search) |
+            Q(etudiant__phone__icontains=search) |
+            Q(etudiant__agent__agent_name__icontains=search) |
+            Q(etudiant__agent__phone__icontains=search) |
+            Q(etudiant__agent__phone_2__icontains=search) |
+            Q(etudiant__agent__whatsapp_phone__icontains=search)
+        )
+
+    queryset = queryset[:10]  # limit for autocomplete
+
+    serializer = ParticipantAutoSerializer(queryset, many=True)
+    return Response(serializer.data)
+
+
+@api_view(['GET'])
+def participants_list(request):
+    competition_id = request.GET.get('competition')
+    level_id = request.GET.get('level')
+
+    if not competition_id:
+        return Response([], status=200)
+
+    queryset = Participant.objects.filter(
+        competition_id=competition_id,
+        level_id=level_id,
+    ).select_related('etudiant', 'etudiant__agent')
+
+    serializer = ParticipantAutoSerializer(queryset, many=True)
+    return Response(serializer.data)
+
+
+@api_view(['POST'])
+def assign_participants(request):
+
+    competition_id = request.data.get('competition')
+    participants = request.data.get('participants', [])
+
+    if not competition_id:
+        return Response(
+            {"error": "Competition is required"},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    if not participants:
+        return Response(
+            {"error": "No participants provided"},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    try:
+        competition = Competition.objects.get(id=competition_id)
+    except Competition.DoesNotExist:
+        return Response(
+            {"error": "Competition not found"},
+            status=status.HTTP_404_NOT_FOUND
+        )
+
+    created = []
+    skipped = []
+
+    with transaction.atomic():
+        for item in participants:
+            etudiant_id = item.get('etudiant_id')
+            level = item.get('level')
+
+            if not etudiant_id or not level:
+                continue
+
+            obj, created_flag = Participant.objects.update_or_create(
+                competition=competition,
+                etudiant_id=etudiant_id,
+                level_id=level
+            )
+
+            if created_flag:
+                created.append(etudiant_id)
+            else:
+                skipped.append(etudiant_id)
+
+    return Response({
+        "created": created,
+        "skipped": skipped,
+        "message": "Participants processed successfully"
+    })
 
 
 @api_view(['GET'])

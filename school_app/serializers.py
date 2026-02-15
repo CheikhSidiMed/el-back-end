@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Branche, Classe, Niveau, Agent, Etudiant, Mois, Exam, Paiement, Inscription, Garant, GarantPaiement, SalaryPayment, Employee, Job, BankAccount, Receipt, ReceiptPayment, Utilisateur, Activity, AcademicYear, MonthlyReport, DailyAbsence, AccountCategory, Account, Transaction, Permission, Suspension, AbsenceActivity, AbsElmhdara, SabakQurra, Evaluation, SabakHakam
+from .models import Branche, Classe, Niveau, Agent, Etudiant, Mois, Exam, Paiement, Inscription, Garant, GarantPaiement, SalaryPayment, Employee, Job, BankAccount, Receipt, ReceiptPayment, Utilisateur, Activity, AcademicYear, MonthlyReport, DailyAbsence, AccountCategory, Account, Transaction, Permission, Suspension, AbsenceActivity, AbsElmhdara, Competition, Tasfiya, Juge, Participant, Evaluation, CompetitionLevel
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
 
@@ -469,49 +469,113 @@ class SuspensionSerializer(serializers.ModelSerializer):
 class ReactivateSuspensionSerializer(serializers.Serializer):
     reactivation_reason = serializers.CharField(required=False, allow_blank=True)
 
-class SabakQurraSerializer(serializers.ModelSerializer):
+
+# class SabakHakamSerializer(serializers.ModelSerializer):
+#     last_name = serializers.CharField(source='user.first_name', read_only=True)
+
+#     class Meta:
+#         model = SabakHakam
+#         fields = ['id', 'created_at', 'sabak', 'user', 'last_name']
+
+
+# class EvaluationSerializer(serializers.ModelSerializer):
+#     last_name = serializers.CharField(source='hakam.first_name', read_only=True)
+
+#     class Meta:
+#         model = Evaluation
+#         fields = [
+#             'id', 
+#             'created_at', 
+#             'sabak', 
+#             'etudiant', 
+#             'hakam', 
+#             'personality', 
+#             'voice', 
+#             'performance', 
+#             'memorization', 
+#             'level', 
+#             'last_name'
+#             ]
+#         read_only_fields = ['hakam', 'created_at']
+
+#     def validate_etudiant(self, etudiant):
+#         if not etudiant.is_active:
+#             raise serializers.ValidationError(
+#                 "Cet étudiant n'est pas actif."
+#             )
+
+#         if etudiant.etat != 'inscrit':
+#             raise serializers.ValidationError(
+#                 "Cet étudiant n'est pas inscrit."
+#             )
+
+#         return etudiant
+
+
+
+
+class CompetitionSerializer(serializers.ModelSerializer):
     class Meta:
-        model = SabakQurra
+        model = Competition
         fields = '__all__'
 
-class SabakHakamSerializer(serializers.ModelSerializer):
+class TasfiyaSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Tasfiya
+        fields = '__all__'
+
+class CompetitionLevelSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = CompetitionLevel
+        fields = '__all__'
+
+class JugeSerializer(serializers.ModelSerializer):
     last_name = serializers.CharField(source='user.first_name', read_only=True)
+    class Meta:
+        model = Juge
+        fields = ['id', 'created_at', 'competition', 'user', 'last_name']
+
+class ParticipantSerializer(serializers.ModelSerializer):
+    student_name = serializers.CharField(source='etudiant.student_name', read_only=True)
+    
+    class Meta:
+        model = Participant
+        fields = ['id', 'competition', 'level', 'student_name']
+
+class ParticipantAutoSerializer(serializers.ModelSerializer):
+    student_id = serializers.CharField(source='etudiant.id')
+    student_name = serializers.CharField(source='etudiant.student_name')
+    phone = serializers.CharField(source='etudiant.phone', allow_null=True)
+    agent_phone = serializers.CharField(source='etudiant.agent.phone', allow_null=True)
+    agent_name = serializers.CharField(source='etudiant.agent.agent_name', allow_null=True)
+    agent_phone = serializers.CharField(source='etudiant.agent.phone', allow_null=True)
+    brach_name = serializers.CharField(source='etudiant.branche.nom', allow_null=True)
+    class_name = serializers.CharField(source='etudiant.classe.nom', allow_null=True)
+    level_name = serializers.CharField(source='level.name', allow_null=True)
 
     class Meta:
-        model = SabakHakam
-        fields = ['id', 'created_at', 'sabak', 'user', 'last_name']
-
+        model = Participant
+        fields = [
+            'id',
+            'student_id',
+            'student_name',
+            'phone',
+            'brach_name',
+            'class_name',
+            'agent_phone',
+            'agent_name',
+            'agent_phone',
+            'level',
+            'level_name',
+        ]
 
 class EvaluationSerializer(serializers.ModelSerializer):
-    last_name = serializers.CharField(source='hakam.first_name', read_only=True)
+    total_score = serializers.SerializerMethodField()
 
     class Meta:
         model = Evaluation
-        fields = [
-            'id', 
-            'created_at', 
-            'sabak', 
-            'etudiant', 
-            'hakam', 
-            'personality', 
-            'voice', 
-            'performance', 
-            'memorization', 
-            'level', 
-            'last_name'
-            ]
-        read_only_fields = ['hakam', 'created_at']
+        fields = '__all__'
+        read_only_fields = ['juge']
 
-    def validate_etudiant(self, etudiant):
-        if not etudiant.is_active:
-            raise serializers.ValidationError(
-                "Cet étudiant n'est pas actif."
-            )
-
-        if etudiant.etat != 'inscrit':
-            raise serializers.ValidationError(
-                "Cet étudiant n'est pas inscrit."
-            )
-
-        return etudiant
-
+    def get_total_score(self, obj):
+        return obj.total_score()

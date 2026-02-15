@@ -110,8 +110,10 @@ class Utilisateur(AbstractUser):
 class Classe(models.Model):
     nom = models.CharField(max_length=100)
     niveau = models.CharField(max_length=50, null=True, blank=True)
-    branche = models.ForeignKey(Branche, on_delete=models.CASCADE, related_name='classes',
-    null=True, blank=True )
+    branche = models.ForeignKey(Branche, on_delete=models.CASCADE, related_name='classes', null=True, blank=True )
+
+    class Meta:
+        ordering = ['id']
 
     def __str__(self):
         return f"{self.nom} - {self.niveau}"
@@ -120,6 +122,9 @@ class Niveau(models.Model):
     level_name = models.CharField(max_length=100)
     price = models.DecimalField(max_digits=8, decimal_places=2, default=0.00)
     created_at = models.DateTimeField(auto_now_add=True)
+    
+    class Meta:
+        ordering = ['id']
 
     def __str__(self):
         return self.level_name
@@ -132,7 +137,7 @@ class Agent(models.Model):
     whatsapp_phone = models.CharField(max_length=20, null=True, blank=True)
 
     class Meta:
-        ordering = ['-id'] 
+        ordering = ['id'] 
 
     def __str__(self):
         return self.agent_name
@@ -184,6 +189,9 @@ class Etudiant(models.Model):
         default='inscrit'
     )
 
+    class Meta:
+        ordering = ['id']
+
     def __str__(self):
         return self.student_name
 
@@ -222,6 +230,9 @@ class Frais(models.Model):
     date_debut = models.DateField()
     date_fin = models.DateField(null=True, blank=True)
 
+    class Meta:
+        ordering = ['id']
+
     def __str__(self):
         return f"{self.classe.nom} - {self.montant} MRU"
 
@@ -239,6 +250,9 @@ class Activity(models.Model):
     price = models.DecimalField(max_digits=8, decimal_places=2)
     session = models.CharField(max_length=20)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='active')
+
+    class Meta:
+        ordering = ['id']
 
     def __str__(self):
         return f"{self.name} ({self.session})"
@@ -333,6 +347,9 @@ class Employee(models.Model):
     subscription_date = models.DateField()
     is_actif = models.BooleanField(default=True) 
     id_number = models.CharField(max_length=100, blank=True, null=True)
+    
+    class Meta:
+        ordering = ['id']
 
     def save(self, *args, **kwargs):
         if not self.number:
@@ -350,7 +367,7 @@ class Employee(models.Model):
                 self.number = "1"
 
         super().save(*args, **kwargs)
-
+    
     def __str__(self):
         return f"{self.full_name} ({self.number})"
 
@@ -444,6 +461,9 @@ class Account(models.Model):
     date_opened = models.DateField(auto_now_add=True)
     is_active = models.BooleanField(default=True)
 
+    class Meta:
+        ordering = ['id']
+
     def __str__(self):
         return f"{self.name} ({self.category})"
 
@@ -468,6 +488,9 @@ class Garant(models.Model):
     balance = models.DecimalField(max_digits=8, decimal_places=2, default=0)
     date_c = models.DateField(auto_now_add=True)
     account = models.ForeignKey(Account, on_delete=models.CASCADE)
+
+    class Meta:
+        ordering = ['id']
 
     def __str__(self):
         return f"{self.name} → {self.account} ({self.montant})"
@@ -559,6 +582,8 @@ class Transaction(models.Model):
     )
     is_adjustment = models.BooleanField(default=False)
 
+    class Meta:
+        ordering = ['id']
 
     def __str__(self):
         return f"Transaction {self.id} - {self.paid_amount}"
@@ -610,6 +635,9 @@ class Receipt(models.Model):
         related_name='created_receipts'
     )
     receipt_description = models.TextField(blank=True, null=True)
+
+    class Meta:
+        ordering = ['-receipt_id']
 
     def __str__(self):
         return f"Receipt {self.receipt_id} - {self.total_amount}"
@@ -832,85 +860,135 @@ class AbsElmhdara(models.Model):
     def __str__(self):
         return f"Exam {self.id} - {self.student}"
 
-class SabakQurra(models.Model):
+
+class Competition(models.Model):
     title = models.CharField(max_length=150)
     description = models.TextField(blank=True, null=True)
 
     start_date = models.DateField()
     end_date = models.DateField()
-
+    number_of_tasfiyat = models.PositiveIntegerField(default=1) 
     is_active = models.BooleanField(default=True)
     academic_year = models.ForeignKey(
-        AcademicYear, 
-        on_delete=models.CASCADE, 
-        related_name='sabak_qurra', 
-        default=get_default_academic_year 
+        AcademicYear,
+        on_delete=models.CASCADE,
+        related_name='competitions',
+        default=get_default_academic_year
     )
+
+    class Meta:
+        ordering = ['-start_date']
 
     def __str__(self):
         return self.title
 
-class SabakHakam(models.Model):
-    sabak = models.ForeignKey(
-        SabakQurra,
+class Tasfiya(models.Model):
+    competition = models.ForeignKey(
+        Competition,
         on_delete=models.CASCADE,
-        related_name='hakams'
+        related_name='tasfiyat'
+    )
+    name = models.CharField(max_length=150)
+    order = models.PositiveIntegerField(default=1)
+    start_date = models.DateField(null=True, blank=True)
+    end_date = models.DateField(null=True, blank=True)
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ['order']
+        unique_together = ('competition', 'order')
+
+    def __str__(self):
+        return f"{self.competition.title} - {self.name}"
+
+class Juge(models.Model):
+    competition = models.ForeignKey(
+        Competition,
+        on_delete=models.CASCADE,
+        related_name='juges'
     )
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
-        on_delete=models.SET_NULL,
-        null=True, blank=True,
-        related_name='hakams_user'
+        on_delete=models.CASCADE,
+        related_name='judge_roles'
     )
     created_at = models.DateTimeField(auto_now_add=True)
 
-
     class Meta:
-        unique_together = ('sabak', 'user')
+        unique_together = ('competition', 'user')
 
-class Evaluation(models.Model):
-    # CHOICES = [
-    #     'الحافظ و المجازين',
-    #     '40-59 حزبا',
-    #     '1-15 حزبا',
-    #     'الأشبال',
-    # ],
-    CHOICES = [
-        ('الفرع الأول', 'الفرع الأول'),
-        ('الفرع الثاني', 'الفرع الثاني'),
-        ('الفرع الثالث', 'الفرع الثالث'),
-        ('الفرع الرابع', 'الفرع الرابع'),
-    ]
+    def __str__(self):
+        return f"{self.user} - {self.competition}"
 
-    sabak = models.ForeignKey(
-        SabakQurra,
-        on_delete=models.CASCADE
+class CompetitionLevel(models.Model):
+    name = models.CharField(max_length=250)
+    description = models.CharField(max_length=250)
+
+
+class Participant(models.Model):
+
+    # LEVEL_CHOICES = [
+    #     ('1', 'الفرع الأول'),
+    #     ('2', 'الفرع الثاني'),
+    #     ('3', 'الفرع الثالث'),
+    #     ('4', 'الفرع الرابع'),
+    #     ('5', 'الفرع الخامس'),
+    # ]
+
+    competition = models.ForeignKey(
+        Competition,
+        on_delete=models.CASCADE,
+        related_name='participants'
     )
     etudiant = models.ForeignKey(
         Etudiant,
         on_delete=models.CASCADE,
+        related_name='competition_participations'
+    )
+    # level = models.CharField(
+    #     max_length=2,
+    #     choices=LEVEL_CHOICES
+    # )
+    level = models.ForeignKey(
+        CompetitionLevel,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='competition_level_participations'
+    )
+
+    class Meta:
+        unique_together = ('competition', 'etudiant')
+
+    def __str__(self):
+        return f"{self.etudiant} - {self.get_level_display()}"
+
+class Evaluation(models.Model):
+    participant = models.ForeignKey(
+        Participant,
+        on_delete=models.CASCADE,
         related_name='evaluations'
     )
-    hakam = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
-        on_delete=models.SET_NULL,
-        null=True, blank=True,
-        related_name='hakam_user'
+    juge = models.ForeignKey(
+        Juge,
+        on_delete=models.CASCADE,
+        related_name='evaluations'
     )
-    # 🔹 4 critères
+    tasfiya = models.ForeignKey(
+        Tasfiya,
+        on_delete=models.CASCADE,
+        related_name='evaluations'
+    )
+
     personality = models.PositiveIntegerField()
     voice = models.PositiveIntegerField()
     performance = models.PositiveIntegerField()
     memorization = models.PositiveIntegerField()
-    level = models.CharField(
-        max_length=250,
-        choices=CHOICES,
-        default='الفرع الأول'
-    )
+
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        unique_together = ('sabak', 'etudiant', 'hakam')
+        unique_together = ('participant', 'juge', 'tasfiya')
 
     def total_score(self):
         return (
@@ -919,4 +997,7 @@ class Evaluation(models.Model):
             self.performance +
             self.memorization
         )
+
+    def __str__(self):
+        return f"{self.participant} - {self.juge}"
 

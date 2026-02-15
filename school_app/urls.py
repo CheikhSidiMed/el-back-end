@@ -42,9 +42,16 @@ router.register(r'absence-activitys', AbsenceActivityViewSet, basename="absence-
 router.register(r'exams', ExamViewSet, basename="exam")
 router.register(r'abs-elmhdaras', AbsElmhdaraViewSet, basename="abs-elmhdara")
 
-router.register(r'sabak-qurras', SabakQurraViewSet, basename="sabak-qurra")
-router.register(r'sabak-hakams', SabakHakamViewSet, basename="sabak-hakam")
-router.register(r'evaluations', EvaluationViewSet, basename="evaluation")
+# router.register(r'sabak-qurras', SabakQurraViewSet, basename="sabak-qurra")
+# router.register(r'sabak-hakams', SabakHakamViewSet, basename="sabak-hakam")
+# router.register(r'evaluations', EvaluationViewSet, basename="evaluation")
+
+router.register('competitions', CompetitionViewSet, basename="competition")
+router.register('tasfiyats', TasfiyaViewSet, basename="tasfiyat")
+router.register('juges', JugeViewSet, basename="juge")
+router.register('participants', ParticipantViewSet, basename="participant")
+router.register('evaluations', EvaluationViewSet, basename="evaluation")
+router.register('competition-levels', CompetitionLevelViewSet, basename="competition-level")
 
 urlpatterns = [
     path('', include(router.urls)),
@@ -55,6 +62,7 @@ urlpatterns = [
     path('api/unpaid-students/', unpaid_students, name='unpaid-students'),
     path('api/class-stats/', class_payment_stats, name='class-stats'),
     path('api/student/payments/', student_payments, name='student-payments'),
+    path('api/student-by-level/', student_by_level, name='student-by-levels'),
     path('api/student/unpaid-months/', unpaid_months_until_suspend, name='student-unpaid-months'),
     path('api/garant/payments/', garant_payments, name='garant-payments'),
     path('api/token/', MyTokenObtainPairView.as_view(), name='token_obtain_pair'),
@@ -67,5 +75,11 @@ urlpatterns = [
     path('api/suspensions-create/', create_suspension, name='suspension-create'),
     path('api/suspensions-reactivate/<int:student_id>/', reactivate_student, name='suspension-reactivate'),
     path("api/bank-transfer/", BankTransferView.as_view(), name="bank-transfer"),
+    path('participant/assign/', assign_participants, name='assign-participants'),
+    path('api/participant-by-competition/', participants_by_competition, name='participants-by-competition'),
+    path('api/tasfiyat-by-competition/', tasfiyats_by_competition, name='tasfiyats-by-competition'),
+    path('participants-autocomplite/', participants_autocomplete, name='participants-autocomplite'),
+    path('participants-list/', participants_list, name='participants-lists'),
+
 
 ]
