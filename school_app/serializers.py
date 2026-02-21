@@ -96,10 +96,15 @@ class EtudiantSerializer(serializers.ModelSerializer):
     agent_id = serializers.PrimaryKeyRelatedField(
         queryset=Agent.objects.all(), source='agent', write_only=True, required=False, allow_null=True
     )
+    last_ahzab = serializers.SerializerMethodField()
 
     class Meta:
         model = Etudiant
         fields = '__all__'
+    
+    def get_last_ahzab(self, obj):
+        last_report = MonthlyReport.objects.filter(student=obj).order_by('-created_at').first()
+        return last_report.ahzab if last_report else 1
 
 class MoisSerializer(serializers.ModelSerializer):
     class Meta:
@@ -427,6 +432,7 @@ class PaiementSerializer(serializers.ModelSerializer):
     user_id = serializers.PrimaryKeyRelatedField(
         queryset=Utilisateur.objects.all(), source='user', write_only=True, required=False
     )
+
     class Meta:
         model = Paiement
         fields = '__all__'
@@ -525,9 +531,10 @@ class TasfiyaSerializer(serializers.ModelSerializer):
         fields = '__all__'
 
 class CompetitionLevelSerializer(serializers.ModelSerializer):
+    competition_name = serializers.CharField(source='competition.title', read_only=True)
     class Meta:
         model = CompetitionLevel
-        fields = '__all__'
+        fields = ['id', 'competition', 'competition_name', 'name', 'description']
 
 class JugeSerializer(serializers.ModelSerializer):
     last_name = serializers.CharField(source='user.first_name', read_only=True)
@@ -537,7 +544,7 @@ class JugeSerializer(serializers.ModelSerializer):
 
 class ParticipantSerializer(serializers.ModelSerializer):
     student_name = serializers.CharField(source='etudiant.student_name', read_only=True)
-    
+
     class Meta:
         model = Participant
         fields = ['id', 'competition', 'level', 'student_name']
@@ -552,6 +559,7 @@ class ParticipantAutoSerializer(serializers.ModelSerializer):
     brach_name = serializers.CharField(source='etudiant.branche.nom', allow_null=True)
     class_name = serializers.CharField(source='etudiant.classe.nom', allow_null=True)
     level_name = serializers.CharField(source='level.name', allow_null=True)
+    last_ahzab = serializers.SerializerMethodField()
 
     class Meta:
         model = Participant
@@ -567,7 +575,12 @@ class ParticipantAutoSerializer(serializers.ModelSerializer):
             'agent_phone',
             'level',
             'level_name',
+            'last_ahzab'
         ]
+    
+    def get_last_ahzab(self, obj):
+        last_report = MonthlyReport.objects.filter(student=obj.etudiant).order_by('-created_at').first()
+        return last_report.ahzab if last_report else 1
 
 class EvaluationSerializer(serializers.ModelSerializer):
     total_score = serializers.SerializerMethodField()

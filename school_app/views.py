@@ -35,6 +35,7 @@ from .filters import UtilisateurFilter
 from rest_framework.permissions import AllowAny
 from django.db.models import Avg
 from django.db.models import Q
+import django_filters
 
 
 MONTHS_AR_REVERSE = {
@@ -1412,153 +1413,6 @@ class ClasseEffectifAPIView(APIView):
         })
 
 
-# class SabakQurraViewSet(viewsets.ModelViewSet):
-#     queryset = SabakQurra.objects.all()
-#     serializer_class = SabakQurraSerializer
-#     # filterset_fields = ['is_actif']
-
-#     @action(detail=True, methods=['get'])
-#     def sabak_classement(sabak_id):
-#         return (
-#             Evaluation.objects
-#             .filter(
-#                 sabak_id=sabak_id,
-#                 etudiant__is_active=True,
-#                 etudiant__etat='inscrit'
-#             )
-#             .values(
-#                 'etudiant__id',
-#                 'etudiant__student_name'
-#             )
-#             .annotate(
-#                 final_score=(
-#                     Avg('personality') +
-#                     Avg('voice') +
-#                     Avg('performance') +
-#                     Avg('memorization')
-#                 )
-#             )
-#             .order_by('-final_score')
-#         )
-
-# class SabakHakamViewSet(viewsets.ModelViewSet):
-#     queryset = SabakHakam.objects.all()
-#     serializer_class = SabakHakamSerializer
-#     # filterset_fields = ['is_actif']
-
-#     @action(detail=False, methods=['post'], url_path='hakams')
-#     def assign_hakams(self, request):
-#         hakams = request.data.get('hakams', [])
-#         sabak_id = request.data.get('sabak')
-
-#         if not hakams:
-#             return Response(
-#                 {'error': 'يجب اختيار حكم واحد على الأقل'},
-#                 status=400
-#             )
-
-#         created = []
-#         for hakam_id in hakams:
-            
-#             obj, _ = SabakHakam.objects.get_or_create(
-#                 sabak_id=sabak_id,
-#                 user_id=hakam_id
-#             )
-#             created.append(obj)
-
-#         serializer = SabakHakamSerializer(
-#             created,
-#             many=True
-#         )
-
-#         return Response(serializer.data, status=201)
-
-#     # 🔹 GET : récupérer hakams d’un sabak
-#     @action(detail=True, methods=['get'], url_path='hakams')
-#     def get_hakams(self, request, pk=None):
-#         sabak_id = pk
-
-#         qs = SabakHakam.objects.filter(sabak_id=sabak_id).select_related('user') 
-#         serializer = self.get_serializer(qs, many=True)
-
-#         return Response(serializer.data)
-
-
-# class EvaluationViewSet(viewsets.ModelViewSet):
-#     queryset = Evaluation.objects.all()
-#     serializer_class = EvaluationSerializer
-#     permission_classes = [IsAuthenticated]
-#     # filterset_fields = ['is_actif']
-#     def perform_create(self, serializer):
-#         user = self.request.user
-#         sabak = serializer.validated_data['sabak']
-
-#         try:
-#             SabakHakam.objects.get(
-#                 sabak=sabak,
-#                 user=user
-#             )
-#         except SabakHakam.DoesNotExist:
-#             raise serializers.ValidationError(
-#                 {"detail": "Vous n'êtes pas hakam pour ce sabak"}
-#             )
-#         serializer.save(hakam=user)
-
-#     @action(detail=False, methods=['get'], url_path='excel/(?P<sabak_id>[^/.]+)')
-#     def excel_format(self, request, sabak_id=None):
-
-#         evaluations = (
-#             Evaluation.objects
-#             .filter(sabak_id=sabak_id)
-#             .select_related('hakam', 'etudiant')
-#             .order_by('etudiant_id', 'created_at')
-#         )
-
-#         data = {}
-
-#         for e in evaluations:
-#             etu_id = e.etudiant_id
-
-#             if etu_id not in data:
-
-#                 data[etu_id] = {
-#                     "id": etu_id,
-#                     "sabak": e.sabak_id,
-#                     "etudiant": etu_id,
-#                     "etudiant_name": e.etudiant.student_name,
-#                     "class": e.etudiant.classe.nom if e.etudiant.classe else None,
-#                     "total_score": 0,
-#                 }
-
-#             row = data[etu_id]
-#             idx = sum(1 for k in row if k.startswith("hakam_")) // 6 + 1
-
-#             if idx > 3:
-#                 continue  # max 3 hakams
-
-#             score = calc_score(e)
-            
-#             row[f"hakam_{idx}_name"] = e.hakam.first_name if e.hakam else None
-#             row[f"hakam_{idx}_personality"] = e.personality
-#             row[f"hakam_{idx}_voice"] = e.voice
-#             row[f"hakam_{idx}_performance"] = e.performance
-#             row[f"hakam_{idx}_memorization"] = e.memorization
-#             row[f"hakam_{idx}_score"] = score
-
-#         # calcul total_score = moyenne des hakams
-#         for row in data.values():
-#             scores = [
-#                 row.get(f"hakam_{i}_score")
-#                 for i in (1, 2, 3)
-#                 if row.get(f"hakam_{i}_score") is not None
-#             ]
-#             row["total_score"] = round(sum(scores) / len(scores), 2) if scores else 0
-#             row["totale_scores"] = sum(scores) if scores else 0
-
-#         return Response(list(data.values()))
-
-
-
 
 class CompetitionViewSet(viewsets.ModelViewSet):
     queryset = Competition.objects.all()
@@ -1568,9 +1422,18 @@ class TasfiyaViewSet(viewsets.ModelViewSet):
     queryset = Tasfiya.objects.all()
     serializer_class = TasfiyaSerializer
 
+class CompetitionLevelFilter(django_filters.FilterSet):
+    competition = django_filters.NumberFilter(field_name='competition_id')
+
+    class Meta:
+        model = CompetitionLevel
+        fields = ['competition']
+
 class CompetitionLevelViewSet(viewsets.ModelViewSet):
     queryset = CompetitionLevel.objects.all()
     serializer_class = CompetitionLevelSerializer
+    filter_backends = [DjangoFilterBackend]
+    filterset_class = CompetitionLevelFilter
 
 class JugeViewSet(viewsets.ModelViewSet):
     queryset = Juge.objects.all()
@@ -1947,6 +1810,7 @@ def participants_autocomplete(request):
     if search:
         queryset = queryset.filter(
             Q(etudiant__student_name__icontains=search) |
+            Q(etudiant__id__icontains=search) |
             Q(etudiant__phone__icontains=search) |
             Q(etudiant__agent__agent_name__icontains=search) |
             Q(etudiant__agent__phone__icontains=search) |

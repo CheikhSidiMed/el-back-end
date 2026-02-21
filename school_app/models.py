@@ -860,7 +860,6 @@ class AbsElmhdara(models.Model):
     def __str__(self):
         return f"Exam {self.id} - {self.student}"
 
-
 class Competition(models.Model):
     title = models.CharField(max_length=150)
     description = models.TextField(blank=True, null=True)
@@ -923,17 +922,15 @@ class Juge(models.Model):
 class CompetitionLevel(models.Model):
     name = models.CharField(max_length=250)
     description = models.CharField(max_length=250)
-
+    competition = models.ForeignKey(
+        Competition,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='competition_participation'
+    )
 
 class Participant(models.Model):
-
-    # LEVEL_CHOICES = [
-    #     ('1', 'الفرع الأول'),
-    #     ('2', 'الفرع الثاني'),
-    #     ('3', 'الفرع الثالث'),
-    #     ('4', 'الفرع الرابع'),
-    #     ('5', 'الفرع الخامس'),
-    # ]
 
     competition = models.ForeignKey(
         Competition,
@@ -945,10 +942,6 @@ class Participant(models.Model):
         on_delete=models.CASCADE,
         related_name='competition_participations'
     )
-    # level = models.CharField(
-    #     max_length=2,
-    #     choices=LEVEL_CHOICES
-    # )
     level = models.ForeignKey(
         CompetitionLevel,
         on_delete=models.SET_NULL,
