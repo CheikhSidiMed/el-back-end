@@ -1881,7 +1881,9 @@ def assign_participants(request):
             obj, created_flag = Participant.objects.update_or_create(
                 competition=competition,
                 etudiant_id=etudiant_id,
-                level_id=level
+                defaults={
+                    "level_id": level
+                }
             )
 
             if created_flag:
