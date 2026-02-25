@@ -1053,7 +1053,6 @@ class SalaryPaymentViewSet(viewsets.ModelViewSet):
             qs = qs.filter(month=month)
         return qs
 
-
     @action(detail=False, methods=['post'], url_path='process')
     def process_month(self, request):
 
@@ -1117,7 +1116,24 @@ class SalaryPaymentViewSet(viewsets.ModelViewSet):
                         Employee.objects.filter(id=emp.id).update(
                             balance=F('balance') + amount
                         )
+                        month_number = int(month)  # si month vient en string
+                        month_name_ar = MONTHS_AR.get(month_number, month)
+                        # Création transaction
+                        trans_obj = Transaction(
+                            employee=emp,
+                            paid_amount=amount,
+                            due_amount=0,
+                            remaining_amount=0,
+                            month=month,
+                            description=f"صرف راتب شهر {month_name_ar} للسنة {year_name}",
+                            type="minus",
+                            user=request.user,
+                            is_paiy_month=True,
+                        )
+                        trans_obj._skip_signal = True 
+                        trans_obj.save()
                         created += 1
+
                     else:
                         skipped += 1
 
@@ -2075,6 +2091,10 @@ def garant_payments(request):
 @receiver(pre_save, sender=Transaction)
 def store_old_values(sender, instance, **kwargs):
 
+    # Skip signal si demandé
+    if getattr(instance, "_skip_signal", False):
+        return
+
     if instance.pk:
         try:
             old_instance = Transaction.objects.get(pk=instance.pk)
@@ -2094,7 +2114,9 @@ def store_old_values(sender, instance, **kwargs):
 
 @receiver(post_save, sender=Transaction)
 def update_balances_on_save(sender, instance, created, **kwargs):
-
+    # Skip signal si demandé
+    if getattr(instance, "_skip_signal", False):
+        return
     # Ignorer les transactions d’ajustement
     if instance.is_adjustment:
         return
@@ -2173,7 +2195,8 @@ def filter_transactions(request):
     transactions = Transaction.objects.filter(
         date__date__gte=start_date,
         date__date__lte=end_date,
-        user_id=user_id
+        user_id=user_id,
+        is_paiy_month=False
     ).order_by("date")
 
     serializer = TransactionSerializer(transactions, many=True)

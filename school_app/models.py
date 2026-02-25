@@ -541,6 +541,8 @@ class Transaction(models.Model):
     bank = models.ForeignKey(
         'BankAccount',
         on_delete=models.PROTECT,
+        null=True,
+        blank=True,
         related_name='transactions'
     )
     user = models.ForeignKey(
@@ -581,6 +583,7 @@ class Transaction(models.Model):
         related_name="adjustments"
     )
     is_adjustment = models.BooleanField(default=False)
+    is_paiy_month = models.BooleanField(default=False)
 
     class Meta:
         ordering = ['id']
