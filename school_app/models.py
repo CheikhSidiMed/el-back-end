@@ -976,10 +976,10 @@ class Evaluation(models.Model):
         related_name='evaluations'
     )
 
-    personality = models.PositiveIntegerField()
-    voice = models.PositiveIntegerField()
-    performance = models.PositiveIntegerField()
-    memorization = models.PositiveIntegerField()
+    personality = models.DecimalField(max_digits=6, decimal_places=2)
+    voice = models.DecimalField(max_digits=6, decimal_places=2)
+    performance = models.DecimalField(max_digits=6, decimal_places=2)
+    memorization = models.DecimalField(max_digits=6, decimal_places=2)
 
     created_at = models.DateTimeField(auto_now_add=True)
 
