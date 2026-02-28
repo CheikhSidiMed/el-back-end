@@ -1112,7 +1112,7 @@ class SalaryPaymentViewSet(viewsets.ModelViewSet):
                     )
 
                     if created_flag:
-                        # ✅ Update employee balance safely (atomic)
+                        # Update employee balance safely (atomic)
                         Employee.objects.filter(id=emp.id).update(
                             balance=F('balance') + amount
                         )
@@ -1146,81 +1146,6 @@ class SalaryPaymentViewSet(viewsets.ModelViewSet):
 
         return Response({"success": True, "message": msg})
 
-    # @action(detail=False, methods=['post'], url_path='process')
-    # def process_month(self, request):
-    #     """
-    #     POST /api/salary-payments/process/
-    #     {
-    #       "year": "2025-2026",
-    #       "month": 3,
-    #       "employees": [
-    #           {"id": 1, "amount": 500000},
-    #           {"id": 2, "amount": 450000}
-    #       ]
-    #     }
-    #     ➤ Crée des salaires pour les employés sélectionnés uniquement.
-    #     """
-    #     year_name = request.data.get("year")
-    #     month = request.data.get("month")
-    #     employees_data = request.data.get("employees", [])
-
-    #     if not year_name or not month:
-    #         return Response(
-    #             {"success": False, "message": "يجب تحديد السنة والشهر."},
-    #             status=status.HTTP_400_BAD_REQUEST,
-    #         )
-
-    #     try:
-    #         academic_year = AcademicYear.objects.get(year=year_name)
-    #     except AcademicYear.DoesNotExist:
-    #         return Response(
-    #             {"success": False, "message": "السنة الأكاديمية غير موجودة."},
-    #             status=status.HTTP_404_NOT_FOUND,
-    #         )
-
-    #     if not employees_data:
-    #         return Response(
-    #             {"success": False, "message": "لم يتم تحديد أي موظف."},
-    #             status=status.HTTP_400_BAD_REQUEST,
-    #         )
-
-    #     created, skipped = 0, 0
-
-    #     with transaction.atomic():
-    #         for e in employees_data:
-    #             emp_id = e.get("id")
-    #             amount = Decimal(str(e.get("amount", 0)))
-
-    #             try:
-    #                 emp = Employee.objects.get(id=emp_id, is_actif=True)
-    #             except Employee.DoesNotExist:
-    #                 skipped += 1
-    #                 continue
-
-    #             try:
-                    
-    #                 obj, created_flag = SalaryPayment.objects.get_or_create(
-    #                     employee=emp,
-    #                     academic_year=academic_year,
-    #                     month=month,
-    #                     defaults={
-    #                         "amount": amount,
-    #                         "note": f"Paiement manuel mois {month}",
-    #                     },
-    #                 )
-    #                 if created_flag:
-    #                     created += 1
-    #                 else:
-    #                     skipped += 1
-    #             except IntegrityError:
-    #                 skipped += 1
-
-    #     msg = f"تمت معالجة الرواتب لشهر {month} للسنة {year_name}."
-    #     if skipped:
-    #         msg += f" تم تخطي {skipped} موظف (مسجل مسبقاً أو غير صالح)."
-
-    #     return Response({"success": True, "message": msg})
-       
 class MonthlyReportViewSet(viewsets.ModelViewSet):
     queryset = MonthlyReport.objects.all()
     serializer_class = MonthlyReportSerializer
@@ -1429,11 +1354,71 @@ class ClasseEffectifAPIView(APIView):
         })
 
 
-
 class CompetitionViewSet(viewsets.ModelViewSet):
     queryset = Competition.objects.all()
     serializer_class = CompetitionSerializer
 
+    @action(detail=True, methods=['get'], url_path='statistics')
+    def statistics(self, request, pk=None):
+
+        competition = self.get_object()
+
+        all_participants = Participant.objects.filter(
+            competition=competition
+        )
+
+        total_all = all_participants.count()
+
+        present_all = all_participants.filter(
+            evaluations__isnull=False
+        ).distinct().count()
+
+        absent_all = total_all - present_all
+
+        percent_all = 0
+        if total_all > 0:
+            percent_all = round((present_all / total_all) * 100, 1)
+
+        levels = CompetitionLevel.objects.filter(
+            competition=competition
+        )
+
+        levels_data = []
+
+        for level in levels:
+            participants = all_participants.filter(level=level)
+
+            total = participants.count()
+            present = participants.filter(
+                evaluations__isnull=False
+            ).distinct().count()
+
+            absent = total - present
+
+            percent = 0
+            if total > 0:
+                percent = round((present / total) * 100, 1)
+
+            levels_data.append({
+                "level_id": level.id,
+                "level_name": level.name,
+                "total_participants": total,
+                "present": present,
+                "absent": absent,
+                "percent": percent
+            })
+
+        return Response({
+            "competition_id": competition.id,
+            "competition_title": competition.title,
+            "total_participants": total_all,
+            "total_present": present_all,
+            "total_absent": absent_all,
+            "percent_all": percent_all,
+            "levels": levels_data
+        })
+
+        
 class TasfiyaViewSet(viewsets.ModelViewSet):
     queryset = Tasfiya.objects.all()
     serializer_class = TasfiyaSerializer

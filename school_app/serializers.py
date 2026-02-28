@@ -592,3 +592,44 @@ class EvaluationSerializer(serializers.ModelSerializer):
 
     def get_total_score(self, obj):
         return obj.total_score()
+
+    def validate(self, data):
+        request = self.context.get('request')
+        if not request or not request.user.is_authenticated:
+            raise serializers.ValidationError("User must be authenticated.")
+
+        participant = data['participant']
+        tasfiya = data['tasfiya']
+
+        # Get juge instance for the participant's competition
+        try:
+            data['juge'] = Juge.objects.get(user=request.user, competition=participant.competition)
+        except Juge.DoesNotExist:
+            raise serializers.ValidationError("Connected user is not a juge for this competition.")
+        except Juge.MultipleObjectsReturned:
+            raise serializers.ValidationError("Multiple juge entries found for this user in this competition.")
+
+        juge = data['juge']
+
+        # منع تكرار نفس القاضي
+        if Evaluation.objects.filter(
+            participant=participant,
+            tasfiya=tasfiya,
+            juge=juge
+        ).exists():
+            raise serializers.ValidationError(
+                {"__all__": "هذا القاضي قام بتقييم الطالب مسبقاً"}
+            )
+
+        # منع أكثر من 3 تقييمات
+        count = Evaluation.objects.filter(
+            participant=participant,
+            tasfiya=tasfiya
+        ).count()
+
+        if count >= 3:
+            raise serializers.ValidationError(
+                {"__all__": "تم تقييم هذا الطالب من قبل 3 قضاة بالفعل"}
+            )
+
+        return data       
