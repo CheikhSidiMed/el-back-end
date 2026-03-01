@@ -314,7 +314,7 @@ class UtilisateurSerializer(serializers.ModelSerializer):
     role_id = serializers.PrimaryKeyRelatedField(
         queryset=Job.objects.all(),
         source="role",
-        write_only=True
+        write_only=True,
     )
 
     branches = BrancheSerializer(many=True, read_only=True)
@@ -323,7 +323,8 @@ class UtilisateurSerializer(serializers.ModelSerializer):
         queryset=Branche.objects.all(),
         many=True,
         write_only=True,
-        source='branches'
+        source='branches',
+        required=False
     )
 
     class Meta:
@@ -475,51 +476,6 @@ class SuspensionSerializer(serializers.ModelSerializer):
 class ReactivateSuspensionSerializer(serializers.Serializer):
     reactivation_reason = serializers.CharField(required=False, allow_blank=True)
 
-
-# class SabakHakamSerializer(serializers.ModelSerializer):
-#     last_name = serializers.CharField(source='user.first_name', read_only=True)
-
-#     class Meta:
-#         model = SabakHakam
-#         fields = ['id', 'created_at', 'sabak', 'user', 'last_name']
-
-
-# class EvaluationSerializer(serializers.ModelSerializer):
-#     last_name = serializers.CharField(source='hakam.first_name', read_only=True)
-
-#     class Meta:
-#         model = Evaluation
-#         fields = [
-#             'id', 
-#             'created_at', 
-#             'sabak', 
-#             'etudiant', 
-#             'hakam', 
-#             'personality', 
-#             'voice', 
-#             'performance', 
-#             'memorization', 
-#             'level', 
-#             'last_name'
-#             ]
-#         read_only_fields = ['hakam', 'created_at']
-
-#     def validate_etudiant(self, etudiant):
-#         if not etudiant.is_active:
-#             raise serializers.ValidationError(
-#                 "Cet étudiant n'est pas actif."
-#             )
-
-#         if etudiant.etat != 'inscrit':
-#             raise serializers.ValidationError(
-#                 "Cet étudiant n'est pas inscrit."
-#             )
-
-#         return etudiant
-
-
-
-
 class CompetitionSerializer(serializers.ModelSerializer):
     class Meta:
         model = Competition
@@ -584,10 +540,23 @@ class ParticipantAutoSerializer(serializers.ModelSerializer):
 
 class EvaluationSerializer(serializers.ModelSerializer):
     total_score = serializers.SerializerMethodField()
+    juge_name = serializers.CharField(source='juge.user.first_name', read_only=True)
 
     class Meta:
         model = Evaluation
-        fields = '__all__'
+        fields = [
+            'id',
+            'participant',
+            'juge',
+            'juge_name',
+            'tasfiya',
+            'personality',
+            'voice',
+            'performance',
+            'memorization',
+            'total_score',
+            'created_at'
+        ]
         read_only_fields = ['juge']
 
     def get_total_score(self, obj):
@@ -595,41 +564,53 @@ class EvaluationSerializer(serializers.ModelSerializer):
 
     def validate(self, data):
         request = self.context.get('request')
+
         if not request or not request.user.is_authenticated:
             raise serializers.ValidationError("User must be authenticated.")
 
-        participant = data['participant']
-        tasfiya = data['tasfiya']
+        # ✅ في حالة PATCH نأخذ القيم من instance إذا لم تكن موجودة
+        participant = data.get('participant', getattr(self.instance, 'participant', None))
+        tasfiya = data.get('tasfiya', getattr(self.instance, 'tasfiya', None))
 
-        # Get juge instance for the participant's competition
-        try:
-            data['juge'] = Juge.objects.get(user=request.user, competition=participant.competition)
-        except Juge.DoesNotExist:
-            raise serializers.ValidationError("Connected user is not a juge for this competition.")
-        except Juge.MultipleObjectsReturned:
-            raise serializers.ValidationError("Multiple juge entries found for this user in this competition.")
+        if not participant or not tasfiya:
+            return data  # PATCH جزئي بدون مشاكل
 
-        juge = data['juge']
+        # فقط عند الإنشاء نطبق منطق المنع
+        if self.instance is None:  # يعني POST
+            try:
+                juge = Juge.objects.get(
+                    user=request.user,
+                    competition=participant.competition
+                )
+                data['juge'] = juge
 
-        # منع تكرار نفس القاضي
-        if Evaluation.objects.filter(
-            participant=participant,
-            tasfiya=tasfiya,
-            juge=juge
-        ).exists():
-            raise serializers.ValidationError(
-                {"__all__": "هذا القاضي قام بتقييم الطالب مسبقاً"}
-            )
+            except Juge.DoesNotExist:
+                raise serializers.ValidationError(
+                    "Connected user is not a juge for this competition."
+                )
 
-        # منع أكثر من 3 تقييمات
-        count = Evaluation.objects.filter(
-            participant=participant,
-            tasfiya=tasfiya
-        ).count()
+            # منع تكرار نفس القاضي
+            if Evaluation.objects.filter(
+                participant=participant,
+                tasfiya=tasfiya,
+                juge=data['juge']
+            ).exists():
+                raise serializers.ValidationError(
+                    {"__all__": "هذا القاضي قام بتقييم الطالب مسبقاً"}
+                )
 
-        if count >= 3:
-            raise serializers.ValidationError(
-                {"__all__": "تم تقييم هذا الطالب من قبل 3 قضاة بالفعل"}
-            )
+            # منع أكثر من 3 تقييمات
+            count = Evaluation.objects.filter(
+                participant=participant,
+                tasfiya=tasfiya
+            ).count()
 
-        return data       
+            if count >= 3:
+                raise serializers.ValidationError(
+                    {"__all__": "تم تقييم هذا الطالب من قبل 3 قضاة بالفعل"}
+                )
+
+        return data
+
+
+

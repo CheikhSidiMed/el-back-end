@@ -1418,7 +1418,7 @@ class CompetitionViewSet(viewsets.ModelViewSet):
             "levels": levels_data
         })
 
-        
+
 class TasfiyaViewSet(viewsets.ModelViewSet):
     queryset = Tasfiya.objects.all()
     serializer_class = TasfiyaSerializer
@@ -1517,7 +1517,6 @@ class EvaluationViewSet(viewsets.ModelViewSet):
 
         serializer.save(juge=juge)
 
-
     @action(detail=False, methods=['post'], url_path='excel')
     def excel_format(self, request):
         tasfiya_id = request.data.get("tasfiya_id")
@@ -1604,8 +1603,27 @@ class EvaluationViewSet(viewsets.ModelViewSet):
                 row["totale_scores"] = 0
                 row["total_score"] = 0
 
-        return Response(list(result.values()))
+        # تحويل dict إلى list
+        final_result = list(result.values())
 
+        # ترتيب تنازلي حسب total_score
+        final_result.sort(key=lambda x: x["total_score"], reverse=True)
+
+        return Response(final_result)
+
+    def get_queryset(self):
+        queryset = Evaluation.objects.all()
+
+        participant = self.request.query_params.get('participant')
+        tasfiya = self.request.query_params.get('tasfiya')
+
+        if participant:
+            queryset = queryset.filter(participant_id=participant)
+
+        if tasfiya:
+            queryset = queryset.filter(tasfiya_id=tasfiya)
+
+        return queryset
 
 @api_view(['GET'])
 def daily_absence_list(request):

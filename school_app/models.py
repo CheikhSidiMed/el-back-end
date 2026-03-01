@@ -957,7 +957,7 @@ class Participant(models.Model):
         unique_together = ('competition', 'etudiant')
 
     def __str__(self):
-        return f"{self.etudiant} - {self.get_level_display()}"
+        return f"{self.etudiant}"
 
 class Evaluation(models.Model):
     participant = models.ForeignKey(
@@ -985,6 +985,8 @@ class Evaluation(models.Model):
 
     class Meta:
         unique_together = ('participant', 'juge', 'tasfiya')
+        ordering = ['id']
+
 
     def total_score(self):
         return (
