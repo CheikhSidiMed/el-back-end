@@ -1519,6 +1519,7 @@ class EvaluationViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['post'], url_path='excel')
     def excel_format(self, request):
+
         tasfiya_id = request.data.get("tasfiya_id")
         level = request.data.get("level")
 
@@ -1528,6 +1529,17 @@ class EvaluationViewSet(viewsets.ModelViewSet):
                 status=400
             )
 
+        # ✅ STEP 1: Get ALL participants for this level
+        participants = (
+            Participant.objects
+            .filter(level_id=level)
+            .select_related(
+                'etudiant',
+                'etudiant__classe'
+            )
+        )
+
+        # ✅ STEP 2: Get evaluations (if exist)
         evaluations = (
             Evaluation.objects
             .filter(
@@ -1536,60 +1548,54 @@ class EvaluationViewSet(viewsets.ModelViewSet):
             )
             .select_related(
                 'juge',
-                'participant',
-                'participant__etudiant',
-                'participant__etudiant__classe'
+                'participant'
             )
             .order_by('participant_id', 'juge_id')
         )
 
-        result = {}
-
+        # Group evaluations by participant
+        eval_dict = {}
         for e in evaluations:
-            part_id = e.participant_id
+            eval_dict.setdefault(e.participant_id, []).append(e)
 
-            if part_id not in result:
-                result[part_id] = {
-                    "participant_id": part_id,
-                    "tasfiya": e.tasfiya_id,
-                    "etudiant": e.participant.etudiant_id,
-                    "etudiant_name": e.participant.etudiant.student_name,
-                    "class": (
-                        e.participant.etudiant.classe.nom
-                        if e.participant.etudiant.classe else None
-                    ),
-                    "total_score": 0,
-                    "totale_scores": 0,
-                }
+        result = []
 
-            row = result[part_id]
+        # ✅ STEP 3: Loop over ALL participants
+        for p in participants:
 
-            # Compter combien de juges déjà ajoutés
-            existing_judges = len([
-                k for k in row.keys() if k.startswith("juge_") and k.endswith("_score")
-            ])
+            row = {
+                "participant_id": p.id,
+                "tasfiya": tasfiya_id,
+                "etudiant": p.etudiant_id,
+                "etudiant_name": p.etudiant.student_name,
+                "class": (
+                    p.etudiant.classe.nom
+                    if p.etudiant.classe else None
+                ),
+                "total_score": 0,
+                "totale_scores": 0,
+            }
 
-            juge_index = existing_judges + 1
+            participant_evals = eval_dict.get(p.id, [])
 
-            if juge_index > 3:
-                continue  # max 3 juges
+            # Add up to 3 judges
+            for index, e in enumerate(participant_evals[:3], start=1):
 
-            score = (
-                e.personality +
-                e.voice +
-                e.performance +
-                e.memorization
-            )
+                score = (
+                    e.personality +
+                    e.voice +
+                    e.performance +
+                    e.memorization
+                )
 
-            row[f"juge_{juge_index}_id"] = e.juge.id if e.juge else None
-            row[f"juge_{juge_index}_personality"] = e.personality
-            row[f"juge_{juge_index}_voice"] = e.voice
-            row[f"juge_{juge_index}_performance"] = e.performance
-            row[f"juge_{juge_index}_memorization"] = e.memorization
-            row[f"juge_{juge_index}_score"] = score
+                row[f"juge_{index}_id"] = e.juge.id if e.juge else None
+                row[f"juge_{index}_personality"] = e.personality
+                row[f"juge_{index}_voice"] = e.voice
+                row[f"juge_{index}_performance"] = e.performance
+                row[f"juge_{index}_memorization"] = e.memorization
+                row[f"juge_{index}_score"] = score
 
-        # Calcul moyenne
-        for row in result.values():
+            # ✅ Calculate average
             scores = [
                 row.get(f"juge_{i}_score")
                 for i in (1, 2, 3)
@@ -1599,18 +1605,14 @@ class EvaluationViewSet(viewsets.ModelViewSet):
             if scores:
                 row["totale_scores"] = sum(scores)
                 row["total_score"] = round(sum(scores) / len(scores), 2)
-            else:
-                row["totale_scores"] = 0
-                row["total_score"] = 0
 
-        # تحويل dict إلى list
-        final_result = list(result.values())
+            result.append(row)
 
-        # ترتيب تنازلي حسب total_score
-        final_result.sort(key=lambda x: x["total_score"], reverse=True)
+        # ✅ Sort by total_score DESC
+        result.sort(key=lambda x: x["total_score"], reverse=True)
 
-        return Response(final_result)
-
+        return Response(result)
+        
     def get_queryset(self):
         queryset = Evaluation.objects.all()
 
