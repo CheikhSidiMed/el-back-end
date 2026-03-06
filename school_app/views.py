@@ -8,7 +8,6 @@ from django.db import transaction
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.decorators import api_view, permission_classes, action
 
-from django.db.models import Sum, Count, F
 from calendar import monthrange
 from collections import defaultdict
 from rest_framework.views import APIView
@@ -33,10 +32,11 @@ from rest_framework import filters
 from django.db import transaction as db_transaction
 from .filters import UtilisateurFilter
 from rest_framework.permissions import AllowAny
-from django.db.models import Avg
-from django.db.models import Q
 import django_filters
+from django.db import models
 
+from django.db.models import Q, F, Avg, Sum, Case, When, Count, Value, DecimalField, CharField
+from django.db.models.functions import Coalesce
 
 MONTHS_AR_REVERSE = {
     "يناير": 1,
@@ -334,6 +334,76 @@ class TransactionViewSet(viewsets.ModelViewSet):
             },
             status=status.HTTP_200_OK,
         )
+
+    @action(detail=False, methods=['get'], url_path='bank-statistics')
+    def bank_statistics(self, request):
+
+        account_id = request.GET.get('account_id')
+
+        qs = Transaction.objects.filter(account_id=account_id)
+
+        stats = (
+            qs.values(
+                bank_name=Case(
+                    When(bank__category=1, then=Value('الصندوق')),
+                    default=F('bank__bank_name'),
+                    output_field=CharField()
+                )
+            )
+            .annotate(
+                total_plus=Coalesce(
+                    Sum(
+                        Case(
+                            When(type='plus', then=F('paid_amount')),
+                            default=Value(0),
+                            output_field=DecimalField()
+                        )
+                    ),
+                    Value(0),
+                    output_field=DecimalField()
+                ),
+                total_minus=Coalesce(
+                    Sum(
+                        Case(
+                            When(type='minus', then=F('paid_amount')),
+                            default=Value(0),
+                            output_field=DecimalField()
+                        )
+                    ),
+                    Value(0),
+                    output_field=DecimalField()
+                )
+            )
+        )
+
+        result = []
+        total_plus = 0
+        total_minus = 0
+
+        for row in stats:
+            balance = row["total_plus"] - row["total_minus"]
+
+            result.append({
+                "bank_name": row["bank_name"],
+                "total_plus": row["total_plus"],
+                "total_minus": row["total_minus"],
+                "balance": balance
+            })
+
+            total_plus += row["total_plus"]
+            total_minus += row["total_minus"]
+
+        totals = {
+            "total_plus": total_plus,
+            "total_minus": total_minus,
+            "balance": total_plus - total_minus
+        }
+
+        return Response({
+            "banks": result,
+            "totals": totals
+        })
+
 
 class PaiementViewSet(viewsets.ModelViewSet):
     queryset = Paiement.objects.all()
