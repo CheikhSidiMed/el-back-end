@@ -1,7 +1,7 @@
 from django.shortcuts import render
 from rest_framework import viewsets
 from rest_framework.response import Response
-from .models import Branche, Classe, Niveau, Agent, Receipt, SalaryPayment, ReceiptPayment, Exam, AbsElmhdara, Job, Inscription, Garant, GarantPaiement, Employee, Transaction, Etudiant, Mois, Paiement, BankAccount, Receipt, ReceiptPayment, Utilisateur, Activity, AcademicYear, MonthlyReport, DailyAbsence, AccountCategory, Account, Permission, Suspension, AbsenceActivity, Competition, Tasfiya, Juge, Participant, Evaluation, CompetitionLevel
+from .models import Branche, Classe, Niveau, Agent, Receipt, SalaryPayment, ReceiptPayment, PaiementTransations, Exam, AbsElmhdara, Job, Inscription, Garant, GarantPaiement, Employee, Transaction, Etudiant, Mois, Paiement, BankAccount, Receipt, ReceiptPayment, Utilisateur, Activity, AcademicYear, MonthlyReport, DailyAbsence, AccountCategory, Account, Permission, Suspension, AbsenceActivity, Competition, Tasfiya, Juge, Participant, Evaluation, CompetitionLevel
 from .serializers import *
 from rest_framework_simplejwt.views import TokenObtainPairView
 from django.db import transaction
@@ -81,6 +81,23 @@ def calc_score(e):
         e.memorization,
         2
     )
+
+def convert_months_to_ar(months_str):
+    if not months_str:
+        return ""
+
+    months = [int(m.strip()) for m in months_str.split(",")]
+    return "، ".join(MONTHS_AR.get(m, "") for m in months)
+
+def convert_months_to_ar_m(months):
+    if not months:
+        return ""
+
+    if isinstance(months, int):
+        return MONTHS_AR.get(months, "")
+
+    months_list = [int(m.strip()) for m in str(months).split(",")]
+    return "، ".join(MONTHS_AR.get(m, "") for m in months_list)
 
 
 class BrancheViewSet(viewsets.ModelViewSet):
@@ -404,7 +421,6 @@ class TransactionViewSet(viewsets.ModelViewSet):
             "totals": totals
         })
 
-
 class PaiementViewSet(viewsets.ModelViewSet):
     queryset = Paiement.objects.all()
     serializer_class = PaiementSerializer
@@ -493,6 +509,19 @@ class PaiementViewSet(viewsets.ModelViewSet):
                         bank_id=bank_id,
                         user=request.user
                     )
+                    PaiementTransations.objects.create(
+                        receipt=receipt,
+                        etudiant=student,
+                        academic_year_id=ex["academic_year"],
+                        month=None,
+                        due_amount=0,
+                        paid_amount=Decimal(str(ex["amount"])),
+                        description=f"الطالب(ة) {student.student_name} سدد(ت): {{ {ex['des']} }}",
+                        remaining_amount= 0,
+                        bank_id=bank_id,
+                        gent_id=None,
+                        user=request.user
+                    )
                     ReceiptPayment.objects.create(receipt=receipt, transaction=txn)
                     created_transactions.append(txn.pk)
 
@@ -513,6 +542,21 @@ class PaiementViewSet(viewsets.ModelViewSet):
                             "agent_id": None,
                             "user": request.user
                         }
+                    )
+                    PaiementTransations.objects.create(
+                        receipt=receipt,
+                        etudiant=student,
+                        academic_year_id=p["academic_year"],
+                        month=p["month"],
+                        due_amount=Decimal(str(p["due_amount"])),
+                        paid_amount=Decimal(str(p["paid_amount"])),
+                        remaining_amount= max(
+                            Decimal("0.0"),
+                            Decimal(str(p["due_amount"])) - Decimal(str(p["paid_amount"]))
+                        ),
+                        bank_id=bank_id,
+                        agent_id=None,
+                        user=request.user
                     )
 
                     if not created:
@@ -595,6 +639,19 @@ class PaiementViewSet(viewsets.ModelViewSet):
                         bank_id=bank_id,
                         user=request.user
                     )
+                    PaiementTransations.objects.create(
+                        receipt=receipt,
+                        etudiant=None,
+                        academic_year_id=ex["academic_year"],
+                        month=None,
+                        due_amount=0,
+                        paid_amount=Decimal(str(ex["amount"])),
+                        description=f"الوكيل(ة) {agent_name} سدد(ت): {{ {ex['des']} }}",
+                        remaining_amount= 0,
+                        bank_id=bank_id,
+                        agent_id=agent_id,
+                        user=request.user
+                    )
                     ReceiptPayment.objects.create(receipt=receipt, transaction=txn)
                     created_transactions.append(txn.pk)
 
@@ -619,6 +676,21 @@ class PaiementViewSet(viewsets.ModelViewSet):
                             "agent_id": agent_id,
                             "user": request.user
                         }
+                    )
+                    PaiementTransations.objects.create(
+                        receipt=receipt,
+                        etudiant=student,
+                        academic_year_id=p["academic_year"],
+                        month=p["month"],
+                        due_amount=Decimal(str(p["due_amount"])),
+                        paid_amount=Decimal(str(p["paid_amount"])),
+                        remaining_amount= max(
+                            Decimal("0.0"),
+                            Decimal(str(p["due_amount"])) - Decimal(str(p["paid_amount"]))
+                        ),
+                        bank_id=bank_id,
+                        agent_id=agent_id,
+                        user=request.user
                     )
 
                     if not created:
@@ -1109,6 +1181,10 @@ class EmployeeViewSet(viewsets.ModelViewSet):
             }
         }, status=200)
 
+class PaiementTransationsViewSet(viewsets.ModelViewSet):
+    queryset = PaiementTransations.objects.all()
+    serializer_class = PaiementTransationsSerializer
+
 class SalaryPaymentViewSet(viewsets.ModelViewSet):
     queryset = SalaryPayment.objects.all()
     serializer_class = SalaryPaymentSerializer
@@ -1423,7 +1499,6 @@ class ClasseEffectifAPIView(APIView):
             "totals": nombre_inscrits
         })
 
-
 class CompetitionViewSet(viewsets.ModelViewSet):
     queryset = Competition.objects.all()
     serializer_class = CompetitionSerializer
@@ -1487,7 +1562,6 @@ class CompetitionViewSet(viewsets.ModelViewSet):
             "percent_all": percent_all,
             "levels": levels_data
         })
-
 
 class TasfiyaViewSet(viewsets.ModelViewSet):
     queryset = Tasfiya.objects.all()
@@ -2411,6 +2485,8 @@ def unpaid_students(request):
     branch_id = request.GET.get('branch_id')
     class_id = request.GET.get('class_id')
     year_id = request.GET.get('year_id')
+    month = request.GET.get('month')
+    month = int(month) if month else None
 
     if not year_id:
         return Response({"error": "year_id est obligatoire"}, status=400)
@@ -2453,6 +2529,15 @@ def unpaid_students(request):
 
         while current <= end_date:
             month_number = current.month
+
+            # 🔹 فلترة بالشهر إذا تم إرساله
+            if month and month_number != month:
+                if current.month == 12:
+                    current = date(current.year + 1, 1, 1)
+                else:
+                    current = date(current.year, current.month + 1, 1)
+                continue
+
             month_name = ARABIC_MONTHS[month_number - 1]
 
             payments_for_month = payments.filter(month=month_number)
@@ -2481,6 +2566,11 @@ def unpaid_students(request):
             result.append({
                 "id": student.id,
                 "student_name": student.student_name,
+                "agent": {
+                    "id": student.agent.id,
+                    "name": student.agent.agent_name,
+                    "phone": student.agent.phone
+                } if student.agent else None,
                 "branch_name": student.branche.nom,
                 "class_name": student.classe.nom,
                 "phone": student.agent.whatsapp_phone if student.agent and student.agent.whatsapp_phone else student.phone,
@@ -2747,5 +2837,127 @@ def reactivate_student(request, student_id):
     except Exception as e:
         return Response({"error": str(e)}, status=400)
 
+
+@api_view(['GET'])
+def get_last_receipt(request):
+    student_id = request.GET.get('student_id')
+    agent_id = request.GET.get('agent_id')
+
+    receipt = None
+
+    if student_id:
+        receipt = Receipt.objects.filter(student_id=student_id).order_by('-receipt_id').first()
+
+    elif agent_id:
+        receipt = Receipt.objects.filter(agent_id=agent_id).order_by('-receipt_id').first()
+
+    if not receipt:
+        return Response({"message": "no receipt"})
+
+    payments = Transaction.objects.filter(
+        receipt_payments__receipt=receipt
+    ).select_related('bank')
+
+    data = {
+        "receipt_id": receipt.receipt_id,
+        "receipt_date": receipt.receipt_date,
+        "total_amount": receipt.total_amount,
+        "created_by": receipt.created_by.first_name if receipt.created_by else None,
+        "academic_year": {"year" : receipt.academic_year.year if receipt.academic_year else None},
+
+        "student": {
+            "id": receipt.student.id,
+            "student_name": receipt.student.student_name,
+            "student_name": receipt.student.student_name,
+            "classe": {"nom": receipt.student.classe.nom },
+            "branche": {"nom": receipt.student.branche.nom },
+            "phone": receipt.student.phone,
+        } if receipt.student else None,
+        "bank": {
+            "id": payments[0].bank.id,
+            "bank_name": payments[0].bank.bank_name,
+            "category": payments[0].bank.category,
+        } if payments[0].bank else None,
+        "total_remaining": sum(p.remaining_amount for p in payments),
+        "total_due": sum(p.due_amount for p in payments),
+
+        "payments": [
+            {
+                "id": p.id,
+                "month": p.month,
+                "month_name_ar": convert_months_to_ar(p.month),
+                "paid_amount": p.paid_amount,
+                "due_amount": p.due_amount,
+                "remaining_amount": p.remaining_amount,
+            }
+            for p in payments if p.month
+        ],
+        "extras": [
+            {
+                "id": p.id,
+                "amount": p.paid_amount,
+                "des": p.description,
+            }
+            for p in payments if not p.month
+        ]
+    }
+
+    return Response(data)
+
+      
+@api_view(['GET'])
+def get_last_agent_receipt(request):
+    agent_id = request.GET.get('agent_id')
+
+    receipt = None
+
+    if agent_id:
+        receipt = Receipt.objects.filter(agent_id=agent_id).order_by('-receipt_id').first()
+
+    if not receipt:
+        return Response({"message": "no receipt"})
+
+    payments = PaiementTransations.objects.filter(
+        receipt=receipt
+    ).select_related('bank')
+
+    data = {
+        "receipt_id": receipt.receipt_id,
+        "receipt_date": receipt.receipt_date,
+        "total_amount": receipt.total_amount,
+        "created_by": receipt.created_by.first_name if receipt.created_by else None,
+        "academic_year": {"year" : receipt.academic_year.year if receipt.academic_year else None},
+
+        "bank": {
+            "id": payments[0].bank.id,
+            "bank_name": payments[0].bank.bank_name,
+            "category": payments[0].bank.category,
+        } if payments[0].bank else None,
+        "total_remaining": sum(p.remaining_amount for p in payments),
+        "total_due": sum(p.due_amount for p in payments),
+
+        "payments": [
+            {
+                "student": p.etudiant.id if p.etudiant else None,
+                "student_name": p.etudiant.student_name if p.etudiant else None,
+                "classe": p.etudiant.classe.nom if p.etudiant and p.etudiant.classe else None,
+                "month_name_ar": convert_months_to_ar_m(str(p.month)),
+                "paid_amount": p.paid_amount,
+                "due_amount": p.due_amount,
+                "remaining_amount": p.remaining_amount,
+            }
+            for p in payments if p.month
+        ],
+        "extras": [
+            {
+                "id": p.id,
+                "amount": p.paid_amount,
+                "des": p.description,
+            }
+            for p in payments if not p.month
+        ]
+    }
+
+    return Response(data)
 
         

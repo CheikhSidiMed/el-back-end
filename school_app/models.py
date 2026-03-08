@@ -13,6 +13,9 @@ from django.db.models import Max
 def get_default_academic_year():
     return AcademicYear.objects.order_by('-start_date').first()
 
+def get_default_academic_year_receipt():
+    year = AcademicYear.objects.first()
+    return year.id if year else None
     
 class Permission(models.Model):
     code = models.CharField(max_length=100, unique=True)
@@ -638,6 +641,14 @@ class Receipt(models.Model):
         related_name='created_receipts'
     )
     receipt_description = models.TextField(blank=True, null=True)
+    academic_year = models.ForeignKey(
+        AcademicYear,
+        on_delete=models.SET_NULL,
+        blank=True,
+        null=True,
+        related_name='receipt',
+        default=get_default_academic_year_receipt
+    )
 
     class Meta:
         ordering = ['-receipt_id']
@@ -662,6 +673,24 @@ class ReceiptPayment(models.Model):
 
     def __str__(self):
         return f"ReceiptPayment: Receipt {self.receipt_id} - Transaction {self.transaction.id}"
+
+class PaiementTransations(models.Model):
+    etudiant = models.ForeignKey(Etudiant, on_delete=models.SET_NULL, null=True, blank=True)
+    academic_year = models.ForeignKey(AcademicYear, on_delete=models.SET_NULL, null=True, blank=True)
+    month = models.IntegerField(null=True, blank=True)
+    description = models.TextField(null=True, blank=True)
+    due_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    paid_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    remaining_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    payment_date = models.DateField(auto_now_add=True)
+    bank = models.ForeignKey(BankAccount, on_delete=models.SET_NULL, null=True, blank=True)
+    agent = models.ForeignKey(Agent, on_delete=models.SET_NULL, null=True, blank=True)
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True)
+    receipt = models.ForeignKey( Receipt, on_delete=models.CASCADE, related_name='receipt_paymentTransations')
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='created at')
+
+    def __str__(self):
+        return f"{self.etudiant.student_name} - Mois: {self.month} - {self.academic_year.year}"
 
 class Suspension(models.Model):
     """Model to store student suspension information with unpaid months details"""

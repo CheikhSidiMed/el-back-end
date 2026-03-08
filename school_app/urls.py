@@ -52,6 +52,7 @@ router.register('juges', JugeViewSet, basename="juge")
 router.register('participants', ParticipantViewSet, basename="participant")
 router.register('evaluations', EvaluationViewSet, basename="evaluation")
 router.register('competition-levels', CompetitionLevelViewSet, basename="competition-level")
+router.register('paiement-transations', PaiementTransationsViewSet, basename="paiement-transation")
 
 urlpatterns = [
     path('', include(router.urls)),
@@ -80,6 +81,8 @@ urlpatterns = [
     path('api/tasfiyat-by-competition/', tasfiyats_by_competition, name='tasfiyats-by-competition'),
     path('participants-autocomplite/', participants_autocomplete, name='participants-autocomplite'),
     path('participants-list/', participants_list, name='participants-lists'),
+    path('get-last-receipt/', get_last_receipt, name='get-last-receipt'),
+    path('get-last-agent-receipt/', get_last_agent_receipt, name='get-last-agent-receipt'),
 
 
 ]
