@@ -283,7 +283,7 @@ class AcademicYear(models.Model):
 class MonthlyReport(models.Model):
     student = models.ForeignKey(Etudiant, on_delete=models.CASCADE)
     year = models.CharField(max_length=20)
-    month = models.CharField(max_length=20)  # or use IntegerField for 1–12 if preferred
+    month = models.CharField(max_length=20)
 
     ahzab = models.CharField(max_length=100, blank=True, null=True)
     thmn = models.CharField(max_length=100, blank=True, null=True)

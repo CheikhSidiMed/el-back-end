@@ -99,6 +99,22 @@ def convert_months_to_ar_m(months):
     months_list = [int(m.strip()) for m in str(months).split(",")]
     return "، ".join(MONTHS_AR.get(m, "") for m in months_list)
 
+def format_progress(progress_thmn):
+    if progress_thmn is None:
+        return ""
+
+    ahzab = progress_thmn // 8
+    thmn = progress_thmn % 8
+
+    parts = []
+
+    if ahzab:
+        parts.append(f"{ahzab} حزب")
+
+    if thmn:
+        parts.append(f"{thmn} ثمن")
+
+    return " و ".join(parts) if parts else "0"
 
 class BrancheViewSet(viewsets.ModelViewSet):
     serializer_class = BrancheSerializer
@@ -1352,6 +1368,89 @@ class MonthlyReportViewSet(viewsets.ModelViewSet):
 
         return Response(data)
 
+    # @action(detail=False, methods=['get'], url_path='bulk-get')
+    # def bulk_get(self, request):
+    #     classe_id = request.query_params.get('classe')
+    #     month = request.query_params.get('month')
+    #     year = request.query_params.get('year')
+
+    #     month_num = MONTHS_AR_REVERSE.get(month)
+
+    #     # الشهر السابق
+    #     prev_month_num = 12 if month_num == 1 else month_num - 1
+    #     prev_month = MONTHS_AR[prev_month_num]
+
+    #     # التقارير الحالية
+    #     reports = MonthlyReport.objects.filter(
+    #         student__classe_id=classe_id,
+    #         month=month,
+    #         year=year
+    #     ).select_related('student')
+
+    #     # تقارير الشهر السابق
+    #     prev_reports = MonthlyReport.objects.filter(
+    #         student__classe_id=classe_id,
+    #         month=prev_month,
+    #         year=year
+    #     )
+
+    #     prev_map = {
+    #         r.student_id: r
+    #         for r in prev_reports
+    #     }
+
+    #     # الغياب
+    #     absences = (
+    #         DailyAbsence.objects
+    #         .filter(
+    #             student__classe_id=classe_id,
+    #             date__month=month_num,
+    #             currentYear=year
+    #         )
+    #         .values('student_id')
+    #         .annotate(total_absence=Count('id'))
+    #     )
+
+    #     absence_map = {
+    #         a['student_id']: a['total_absence']
+    #         for a in absences
+    #     }
+
+    #     data = []
+
+    #     for report in reports:
+
+    #         serialized = MonthlyReportSerializer(report).data
+
+    #         prev_report = prev_map.get(report.student_id)
+
+    #         # previous_level
+    #         if prev_report:
+    #             serialized['previous_level'] = prev_report.current_level
+    #         else:
+    #             serialized['previous_level'] = None
+
+    #         # progress
+    #         try:
+    #             current_total = int(report.ahzab or 0) + int(report.thmn or 0)
+
+    #             prev_total = 0
+    #             if prev_report:
+    #                 prev_total = int(prev_report.ahzab or 0) + int(prev_report.thmn or 0)
+
+    #             progress = current_total - prev_total
+    #             serialized['progress'] = format_progress(progress)
+
+    #         except:
+    #             serialized['progress'] = None
+
+    #         # absence
+    #         serialized['absence'] = absence_map.get(report.student_id, 0)
+
+    #         data.append(serialized)
+
+    #     return Response(data)
+
     @action(detail=False, methods=['post'], url_path='bulk-save')
     def bulk_save(self, request):
         reports = request.data  # liste
@@ -1508,13 +1607,23 @@ class CompetitionViewSet(viewsets.ModelViewSet):
 
         competition = self.get_object()
 
+        tasfiya_id = request.query_params.get('tasfiyaId')
+
         all_participants = Participant.objects.filter(
             competition=competition
         )
 
+        # filter by tasfiya
+        if tasfiya_id:
+            all_participants = all_participants.filter(
+                evaluations__tasfiya_id=tasfiya_id
+            ).distinct()
+
         total_all = all_participants.count()
 
         present_all = all_participants.filter(
+            evaluations__tasfiya_id=tasfiya_id if tasfiya_id else None
+        ).distinct().count() if tasfiya_id else all_participants.filter(
             evaluations__isnull=False
         ).distinct().count()
 
@@ -1531,12 +1640,19 @@ class CompetitionViewSet(viewsets.ModelViewSet):
         levels_data = []
 
         for level in levels:
+
             participants = all_participants.filter(level=level)
 
             total = participants.count()
-            present = participants.filter(
-                evaluations__isnull=False
-            ).distinct().count()
+
+            if tasfiya_id:
+                present = participants.filter(
+                    evaluations__tasfiya_id=tasfiya_id
+                ).distinct().count()
+            else:
+                present = participants.filter(
+                    evaluations__isnull=False
+                ).distinct().count()
 
             absent = total - present
 
@@ -1556,6 +1672,7 @@ class CompetitionViewSet(viewsets.ModelViewSet):
         return Response({
             "competition_id": competition.id,
             "competition_title": competition.title,
+            "tasfiya_id": tasfiya_id,
             "total_participants": total_all,
             "total_present": present_all,
             "total_absent": absent_all,
@@ -1673,7 +1790,7 @@ class EvaluationViewSet(viewsets.ModelViewSet):
                 status=400
             )
 
-        # ✅ STEP 1: Get ALL participants for this level
+        # STEP 1: Get ALL participants for this level
         participants = (
             Participant.objects
             .filter(level_id=level)
@@ -1683,7 +1800,7 @@ class EvaluationViewSet(viewsets.ModelViewSet):
             )
         )
 
-        # ✅ STEP 2: Get evaluations (if exist)
+        # STEP 2: Get evaluations (if exist)
         evaluations = (
             Evaluation.objects
             .filter(
@@ -1704,7 +1821,7 @@ class EvaluationViewSet(viewsets.ModelViewSet):
 
         result = []
 
-        # ✅ STEP 3: Loop over ALL participants
+        # STEP 3: Loop over ALL participants
         for p in participants:
 
             row = {
@@ -2525,7 +2642,20 @@ def unpaid_students(request):
         start_date = max(student.date_inscription, academic_year.start_date)
         end_date = min(today, academic_year.end_date)
 
-        current = date(start_date.year, start_date.month, 1)
+        # إذا كان التسجيل بعد يوم 15 نحسب من الشهر التالي
+        # if start_date.day > 15:
+        #     if start_date.month == 12:
+        #         current = date(start_date.year + 1, 1, 1)
+        #     else:
+        #         current = date(start_date.year, start_date.month + 1, 1)
+        # else:
+        #     current = date(start_date.year, start_date.month, 1)
+
+        # current = date(start_date.year, start_date.month, 1)
+        if start_date.month == 12:
+            current = date(start_date.year + 1, 1, 1)
+        else:
+            current = date(start_date.year, start_date.month + 1, 1)
 
         while current <= end_date:
             month_number = current.month
