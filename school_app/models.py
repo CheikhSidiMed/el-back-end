@@ -33,12 +33,12 @@ class Permission(models.Model):
 
 class Job(models.Model):
     ROLES = (
-        ('admin_g', 'المدير العام'),
+        ('admin_g', 'مدير عام'),
         ('admin', 'مدير التسجيل والحسابات'),
         ('dg_lessen', 'مدير الدروس'),
         ('admin_m', 'إدارة المقرأة'),
         ('teacher', 'أستاذ(ة)'),
-        ('user', 'المراقب'),
+        ('user', 'مراقب'),
         ('worker', 'عامل'),
         ('hakam', 'حكم'),
     )
@@ -536,6 +536,7 @@ class Transaction(models.Model):
     due_amount = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal("0.00"))
     paid_amount = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal("0.00"))
     remaining_amount = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal("0.00"))
+    sold_emp = models.DecimalField(max_digits=20, decimal_places=2, default=Decimal("0.00"))
     date = models.DateTimeField(default=timezone.now)
 
     description = models.TextField(blank=True, null=True)

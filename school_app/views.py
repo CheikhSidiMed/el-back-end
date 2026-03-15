@@ -1288,7 +1288,7 @@ class SalaryPaymentViewSet(viewsets.ModelViewSet):
                             remaining_amount=0,
                             month=month,
                             description=f"صرف راتب شهر {month_name_ar} للسنة {year_name}",
-                            type="minus",
+                            type="plus",
                             user=request.user,
                             is_paiy_month=True,
                         )
@@ -1326,139 +1326,141 @@ class MonthlyReportViewSet(viewsets.ModelViewSet):
             )
         return queryset
 
-    @action(detail=False, methods=['get'], url_path='bulk-get')
-    def bulk_get(self, request):
-        classe_id = request.query_params.get('classe')
-        month = request.query_params.get('month')
-        year = request.query_params.get('year')
-
-        # 1️⃣ التقارير الشهرية
-        reports = MonthlyReport.objects.filter(
-            student__classe_id=classe_id,
-            month=month,
-            year=year
-        )
-
-        # 2️⃣ الغياب الشهري (DailyAbsence)
-        month_d = MONTHS_AR_REVERSE.get(month)
-
-        absences = (
-            DailyAbsence.objects
-            .filter(
-                student__classe_id=classe_id,
-                date__month=month_d,
-                currentYear=year
-            )
-            .values('student_id')
-            .annotate(total_absence=Count('id'))
-        )
-
-        # 3️⃣ تحويل الغياب إلى dict
-        absence_map = {
-            a['student_id']: a['total_absence']
-            for a in absences
-        }
-
-        # 4️⃣ دمج البيانات
-        data = []
-        for report in reports:
-            serialized = MonthlyReportSerializer(report).data
-            serialized['absence'] = absence_map.get(report.student_id, 0)
-            data.append(serialized)
-
-        return Response(data)
-
     # @action(detail=False, methods=['get'], url_path='bulk-get')
     # def bulk_get(self, request):
     #     classe_id = request.query_params.get('classe')
     #     month = request.query_params.get('month')
     #     year = request.query_params.get('year')
 
-    #     month_num = MONTHS_AR_REVERSE.get(month)
-
-    #     # الشهر السابق
-    #     prev_month_num = 12 if month_num == 1 else month_num - 1
-    #     prev_month = MONTHS_AR[prev_month_num]
-
-    #     # التقارير الحالية
+    #     # 1️⃣ التقارير الشهرية
     #     reports = MonthlyReport.objects.filter(
     #         student__classe_id=classe_id,
     #         month=month,
     #         year=year
-    #     ).select_related('student')
-
-    #     # تقارير الشهر السابق
-    #     prev_reports = MonthlyReport.objects.filter(
-    #         student__classe_id=classe_id,
-    #         month=prev_month,
-    #         year=year
     #     )
 
-    #     prev_map = {
-    #         r.student_id: r
-    #         for r in prev_reports
-    #     }
+    #     # 2️⃣ الغياب الشهري (DailyAbsence)
+    #     month_d = MONTHS_AR_REVERSE.get(month)
 
-    #     # الغياب
     #     absences = (
     #         DailyAbsence.objects
     #         .filter(
     #             student__classe_id=classe_id,
-    #             date__month=month_num,
+    #             date__month=month_d,
     #             currentYear=year
     #         )
     #         .values('student_id')
     #         .annotate(total_absence=Count('id'))
     #     )
 
+    #     # 3️⃣ تحويل الغياب إلى dict
     #     absence_map = {
     #         a['student_id']: a['total_absence']
     #         for a in absences
     #     }
 
+    #     # 4️⃣ دمج البيانات
     #     data = []
-
     #     for report in reports:
-
     #         serialized = MonthlyReportSerializer(report).data
-
-    #         prev_report = prev_map.get(report.student_id)
-
-    #         # previous_level
-    #         if prev_report:
-    #             serialized['previous_level'] = prev_report.current_level
-    #         else:
-    #             serialized['previous_level'] = None
-
-    #         # progress
-    #         try:
-    #             current_total = int(report.ahzab or 0) + int(report.thmn or 0)
-
-    #             prev_total = 0
-    #             if prev_report:
-    #                 prev_total = int(prev_report.ahzab or 0) + int(prev_report.thmn or 0)
-
-    #             progress = current_total - prev_total
-    #             serialized['progress'] = format_progress(progress)
-
-    #         except:
-    #             serialized['progress'] = None
-
-    #         # absence
     #         serialized['absence'] = absence_map.get(report.student_id, 0)
-
     #         data.append(serialized)
 
     #     return Response(data)
 
+    @action(detail=False, methods=['get'], url_path='bulk-get')
+    def bulk_get(self, request):
+        classe_id = request.query_params.get('classe')
+        month = request.query_params.get('month')
+        year = request.query_params.get('year')
+
+        month_num = MONTHS_AR_REVERSE.get(month)
+
+        # الشهر السابق
+        prev_month_num = 12 if month_num == 1 else month_num - 1
+        prev_month = MONTHS_AR[prev_month_num]
+
+        # التقارير الحالية
+        reports = MonthlyReport.objects.filter(
+            student__classe_id=classe_id,
+            month=month,
+            year=year
+        ).select_related('student')
+
+        # تقارير الشهر السابق
+        prev_reports = MonthlyReport.objects.filter(
+            student__classe_id=classe_id,
+            month=prev_month,
+            year=year
+        )
+
+        prev_map = {
+            r.student_id: r
+            for r in prev_reports
+        }
+
+        # الغياب
+        absences = (
+            DailyAbsence.objects
+            .filter(
+                student__classe_id=classe_id,
+                date__month=month_num,
+                currentYear=year
+            )
+            .values('student_id')
+            .annotate(total_absence=Count('id'))
+        )
+
+        absence_map = {
+            a['student_id']: a['total_absence']
+            for a in absences
+        }
+
+        data = []
+
+        for report in reports:
+
+            serialized = MonthlyReportSerializer(report).data
+
+            prev_report = prev_map.get(report.student_id)
+
+            # previous_level
+            if prev_report:
+                serialized['previous_level'] = prev_report.current_level
+            else:
+                serialized['previous_level'] = None
+
+            # progress
+            try:
+                current_total = int(report.ahzab or 0) + int(report.thmn or 0)
+
+                prev_total = 0
+                if prev_report:
+                    prev_total = int(prev_report.ahzab or 0) + int(prev_report.thmn or 0)
+
+                progress = current_total - prev_total
+                serialized['progress'] = format_progress(progress)
+
+            except:
+                serialized['progress'] = None
+
+            # absence
+            serialized['absence'] = absence_map.get(report.student_id, 0)
+
+            data.append(serialized)
+
+        return Response(data)
+
     @action(detail=False, methods=['post'], url_path='bulk-save')
     def bulk_save(self, request):
-        reports = request.data  # liste
+        reports = request.data
         created = 0
         updated = 0
+        saved_reports = []
 
         with transaction.atomic():
             for data in reports:
+
                 obj, is_created = MonthlyReport.objects.update_or_create(
                     student_id=data['student'],
                     month=data['month'],
@@ -1474,13 +1476,109 @@ class MonthlyReportViewSet(viewsets.ModelViewSet):
                         'remarks': data['remarks'],
                     }
                 )
+
                 created += int(is_created)
                 updated += int(not is_created)
 
+                saved_reports.append(obj)
+
+        # -------- نفس منطق bulk_get --------
+        classe_id = saved_reports[0].student.classe_id
+        month = saved_reports[0].month
+        year = saved_reports[0].year
+
+        month_num = MONTHS_AR_REVERSE.get(month)
+
+        prev_month_num = 12 if month_num == 1 else month_num - 1
+        prev_month = MONTHS_AR[prev_month_num]
+
+        prev_reports = MonthlyReport.objects.filter(
+            student__classe_id=classe_id,
+            month=prev_month,
+            year=year
+        )
+
+        prev_map = {r.student_id: r for r in prev_reports}
+
+        absences = (
+            DailyAbsence.objects
+            .filter(
+                student__classe_id=classe_id,
+                date__month=month_num,
+                currentYear=year
+            )
+            .values('student_id')
+            .annotate(total_absence=Count('id'))
+        )
+
+        absence_map = {a['student_id']: a['total_absence'] for a in absences}
+
+        result = []
+
+        for report in saved_reports:
+
+            serialized = MonthlyReportSerializer(report).data
+
+            prev_report = prev_map.get(report.student_id)
+
+            # previous level
+            serialized['previous_level'] = prev_report.current_level if prev_report else None
+
+            # progress
+            try:
+                current_total = int(report.ahzab or 0) + int(report.thmn or 0)
+                prev_total = 0
+
+                if prev_report:
+                    prev_total = int(prev_report.ahzab or 0) + int(prev_report.thmn or 0)
+
+                progress = current_total - prev_total
+                serialized['progress'] = format_progress(progress)
+
+            except:
+                serialized['progress'] = None
+
+            serialized['absence'] = absence_map.get(report.student_id, 0)
+
+            result.append(serialized)
+
         return Response({
-            'created': created,
-            'updated': updated
+            "created": created,
+            "updated": updated,
+            "data": result
         }, status=status.HTTP_200_OK)
+
+    # @action(detail=False, methods=['post'], url_path='bulk-save')
+    # def bulk_save(self, request):
+    #     reports = request.data  # liste
+    #     created = 0
+    #     updated = 0
+
+    #     with transaction.atomic():
+    #         for data in reports:
+    #             obj, is_created = MonthlyReport.objects.update_or_create(
+    #                 student_id=data['student'],
+    #                 month=data['month'],
+    #                 year=data['year'],
+    #                 defaults={
+    #                     'ahzab': data['ahzab'],
+    #                     'thmn': data['thmn'],
+    #                     'memorization_amount': data['memorization_amount'],
+    #                     'previous_level': data['previous_level'],
+    #                     'current_level': data['current_level'],
+    #                     'progress': data['progress'],
+    #                     'absence': data['absence'],
+    #                     'remarks': data['remarks'],
+    #                 }
+    #             )
+    #             created += int(is_created)
+    #             updated += int(not is_created)
+
+    #     return Response({
+    #         'created': created,
+    #         'updated': updated
+    #     }, status=status.HTTP_200_OK)
+
 
 class UtilisateurViewSet(viewsets.ModelViewSet):
     queryset = Utilisateur.objects.all()
@@ -2393,17 +2491,35 @@ def update_balances_on_save(sender, instance, created, **kwargs):
             return
         amount = Decimal(str(amount))
         current_balance = getattr(obj, field_name, Decimal('0.0'))
+        # if operation == "plus":
+        #     setattr(obj, field_name, current_balance + amount)
+        # elif operation == "minus":
+        #     setattr(obj, field_name, current_balance - amount)
+        # obj.save()
         if operation == "plus":
-            setattr(obj, field_name, current_balance + amount)
+            new_balance = current_balance + amount
         elif operation == "minus":
-            setattr(obj, field_name, current_balance - amount)
-        obj.save()
+            new_balance = current_balance - amount
+        else:
+            new_balance = current_balance
+
+        setattr(obj, field_name, new_balance)
+        obj.save(update_fields=[field_name])
+
+        return new_balance
 
     # Si c’est une nouvelle transaction
     if created:
         update_balance(instance.bank, "balance", instance.paid_amount, instance.type)
         update_balance(instance.account, "balance", instance.paid_amount, instance.type)
-        update_balance(instance.employee, "balance", instance.paid_amount, instance.type)
+        # update_balance(instance.employee, "balance", instance.paid_amount, instance.type)
+        emp_balance = update_balance(instance.employee, "balance", instance.paid_amount, instance.type)
+        if emp_balance is not None:
+            # instance._skip_signal = True
+            Transaction.objects.filter(pk=instance.pk).update(
+                sold_emp=emp_balance
+            )
+
         update_balance(instance.inscription, "montant_pay", instance.paid_amount, instance.type)
 
     # Si c’est une mise à jour
@@ -2422,7 +2538,12 @@ def update_balances_on_save(sender, instance, created, **kwargs):
         # Puis on applique la nouvelle version
         update_balance(instance.bank, "balance", instance.paid_amount, instance.type)
         update_balance(instance.account, "balance", instance.paid_amount, instance.type)
-        update_balance(instance.employee, "balance", instance.paid_amount, instance.type)
+        emp_balance = update_balance(instance.employee, "balance", instance.paid_amount, instance.type)
+        if emp_balance is not None:
+            # instance._skip_signal = True
+            Transaction.objects.filter(pk=instance.pk).update(
+                sold_emp=emp_balance
+            )
         update_balance(instance.inscription, "montant_pay", instance.paid_amount, instance.type)
 
 
@@ -2587,8 +2708,17 @@ def filter_transactions_account(request):
     # ---- Totaux période ----
     total_plus = transactions.filter(type="plus").aggregate(s=Sum("paid_amount"))["s"] or 0
     total_minus = transactions.filter(type="minus").aggregate(s=Sum("paid_amount"))["s"] or 0
+    # ---- Employee info ----
+    employee_data = None
+    if employee_id:
+        try:
+            employee = Employee.objects.get(id=employee_id)
+            employee_data = EmployeeSerializer(employee).data
+        except Employee.DoesNotExist:
+            employee_data = None
 
     return Response({
+        "employee": employee_data,
         "transactions": serializer.data,
         "totals": {
             "plus": total_plus,
@@ -2710,6 +2840,220 @@ def unpaid_students(request):
             })
 
     return Response(result)
+
+
+@api_view(['GET'])
+def unpaid_students_not_have_agent(request):
+    branch_id = request.GET.get('branch_id')
+    class_id = request.GET.get('class_id')
+    year_id = request.GET.get('year_id')
+    month = request.GET.get('month')
+    month = int(month) if month else None
+
+    if not year_id:
+        return Response({"error": "year_id est obligatoire"}, status=400)
+
+    try:
+        academic_year = AcademicYear.objects.get(id=year_id)
+    except AcademicYear.DoesNotExist:
+        return Response({"error": "année académique non trouvée"}, status=404)
+
+    students = Etudiant.objects.filter(
+        is_inscrire=1,
+        payment_nature='mensuel',
+        etat='inscrit', 
+        is_active=True,
+        agent__isnull=True
+    ).exclude(
+        date_desectivation__isnull=False,
+    )
+
+    if branch_id:
+        students = students.filter(branche_id=branch_id)
+    if class_id:
+        students = students.filter(classe_id=class_id)
+
+    result = []
+    today = date.today()
+
+    for student in students:
+        payments = Paiement.objects.filter(
+            etudiant=student,
+            academic_year=academic_year
+        )
+
+        total_unpaid = Decimal("0.00")
+        months_unpaid = []
+
+        start_date = max(student.date_inscription, academic_year.start_date)
+        end_date = min(today, academic_year.end_date)
+
+        # إذا كان التسجيل بعد يوم 15 نحسب من الشهر التالي
+        # if start_date.day > 15:
+        #     if start_date.month == 12:
+        #         current = date(start_date.year + 1, 1, 1)
+        #     else:
+        #         current = date(start_date.year, start_date.month + 1, 1)
+        # else:
+        #     current = date(start_date.year, start_date.month, 1)
+
+        # current = date(start_date.year, start_date.month, 1)
+        if start_date.month == 12:
+            current = date(start_date.year + 1, 1, 1)
+        else:
+            current = date(start_date.year, start_date.month + 1, 1)
+
+        while current <= end_date:
+            month_number = current.month
+
+            # 🔹 فلترة بالشهر إذا تم إرساله
+            if month and month_number != month:
+                if current.month == 12:
+                    current = date(current.year + 1, 1, 1)
+                else:
+                    current = date(current.year, current.month + 1, 1)
+                continue
+
+            month_name = ARABIC_MONTHS[month_number - 1]
+
+            payments_for_month = payments.filter(month=month_number)
+
+            # 🔑 S’IL Y A UN ENREGISTREMENT → ON FAIT CONFIANCE AU remaining_amount
+            if payments_for_month.exists():
+                month_remaining = sum(
+                    Decimal(p.remaining_amount or 0)
+                    for p in payments_for_month
+                )
+            else:
+                # Pas de paiement du tout → mois totalement impayé
+                month_remaining = Decimal(student.remaining or 0)
+
+            if month_remaining > 0:
+                months_unpaid.append(month_name)
+                total_unpaid += month_remaining
+
+            # mois suivant
+            if current.month == 12:
+                current = date(current.year + 1, 1, 1)
+            else:
+                current = date(current.year, current.month + 1, 1)
+
+        if total_unpaid > 0:
+            result.append({
+                "id": student.id,
+                "student_name": student.student_name,
+                "agent": {
+                    "id": student.agent.id,
+                    "name": student.agent.agent_name,
+                    "phone": student.agent.phone
+                } if student.agent else None,
+                "branch_name": student.branche.nom,
+                "class_name": student.classe.nom,
+                "phone": student.agent.whatsapp_phone if student.agent and student.agent.whatsapp_phone else student.phone,
+                "months_unpaid": ", ".join(months_unpaid),
+                "unpaid_amount": float(total_unpaid),
+                "date_inscription": student.date_inscription,
+            })
+
+    return Response(result)
+
+
+@api_view(['GET'])
+def unpaid_by_agent(request):
+
+    year_id = request.GET.get('year_id')
+    month = request.GET.get('month')
+
+    if month in [None, "", "null", "undefined"]:
+        month = None
+    else:
+        month = int(month)
+
+    if not year_id:
+        return Response({"error": "year_id est obligatoire"}, status=400)
+
+    try:
+        academic_year = AcademicYear.objects.get(id=year_id)
+    except AcademicYear.DoesNotExist:
+        return Response({"error": "année académique non trouvée"}, status=404)
+
+    students = Etudiant.objects.filter(
+        is_inscrire=1,
+        payment_nature='mensuel',
+        etat='inscrit',
+        is_active=True
+    ).exclude(
+        date_desectivation__isnull=False
+    ).select_related('agent')
+
+    agents = {}
+    today = date.today()
+
+    for student in students:
+
+        payments = Paiement.objects.filter(
+            etudiant=student,
+            academic_year=academic_year
+        )
+
+        total_unpaid = Decimal("0.00")
+        months_unpaid = []
+
+        start_date = max(student.date_inscription, academic_year.start_date)
+        end_date = min(today, academic_year.end_date)
+
+        if start_date.month == 12:
+            current = date(start_date.year + 1, 1, 1)
+        else:
+            current = date(start_date.year, start_date.month + 1, 1)
+
+        while current <= end_date:
+
+            month_number = current.month
+
+            if month and month_number != month:
+                current = date(current.year + (current.month // 12), (current.month % 12) + 1, 1)
+                continue
+
+            month_name = ARABIC_MONTHS[month_number - 1]
+
+            payments_for_month = payments.filter(month=month_number)
+
+            if payments_for_month.exists():
+                month_remaining = sum(
+                    Decimal(p.remaining_amount or 0)
+                    for p in payments_for_month
+                )
+            else:
+                month_remaining = Decimal(student.remaining or 0)
+
+            if month_remaining > 0:
+                months_unpaid.append(month_name)
+                total_unpaid += month_remaining
+
+            current = date(current.year + (current.month // 12), (current.month % 12) + 1, 1)
+
+        if total_unpaid > 0 and student.agent:
+
+            agent_id = student.agent.id
+
+            if agent_id not in agents:
+                agents[agent_id] = {
+                    "agent_id": agent_id,
+                    "agent_name": student.agent.agent_name,
+                    "agent_phone": student.agent.phone,
+                    "students": []
+                }
+
+            agents[agent_id]["students"].append({
+                "student_name": student.student_name,
+                "phone": student.agent.whatsapp_phone if student.agent and student.agent.whatsapp_phone else student.phone,
+                "months_unpaid": ", ".join(months_unpaid),
+                "unpaid_amount": float(total_unpaid),
+                "date_inscription": student.date_inscription
+            })
+
+    return Response(list(agents.values()))
 
 
 @api_view(['GET'])

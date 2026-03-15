@@ -44,6 +44,8 @@ class EmployeeSerializer(serializers.ModelSerializer):
     branche_id = serializers.PrimaryKeyRelatedField(
         queryset=Branche.objects.all(), source='branche', write_only=True, required=False, allow_null=True
     )
+    title = serializers.CharField(source='job.get_title_display')
+
 
     class Meta:
         model = Employee
