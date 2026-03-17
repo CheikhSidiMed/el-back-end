@@ -44,12 +44,17 @@ class EmployeeSerializer(serializers.ModelSerializer):
     branche_id = serializers.PrimaryKeyRelatedField(
         queryset=Branche.objects.all(), source='branche', write_only=True, required=False, allow_null=True
     )
-    title = serializers.CharField(source='job.get_title_display')
+    title = serializers.SerializerMethodField()
 
 
     class Meta:
         model = Employee
         fields = '__all__'
+        
+    def get_title(self, obj):
+        if obj.job:
+            return obj.job.get_title_display()
+        return None
 
     def create(self, validated_data):
         employee = super().create(validated_data)

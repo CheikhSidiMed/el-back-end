@@ -1579,7 +1579,6 @@ class MonthlyReportViewSet(viewsets.ModelViewSet):
     #         'updated': updated
     #     }, status=status.HTTP_200_OK)
 
-
 class UtilisateurViewSet(viewsets.ModelViewSet):
     queryset = Utilisateur.objects.all()
     serializer_class = UtilisateurSerializer
