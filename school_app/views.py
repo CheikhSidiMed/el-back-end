@@ -251,7 +251,7 @@ class EtudiantViewSet(viewsets.ModelViewSet):
         # Rafraîchir le serializer pour renvoyer les données avec l'id généré
         response_serializer = self.get_serializer(instance)
         return Response(response_serializer.data, status=status.HTTP_201_CREATED)
-        
+
     # def create(self, request, *args, **kwargs):
     #     serializer = self.get_serializer(data=request.data)
     #     if not serializer.is_valid():
@@ -553,7 +553,7 @@ class PaiementViewSet(viewsets.ModelViewSet):
                         description=ex["des"],
                         remaining_amount= 0,
                         bank_id=bank_id,
-                        gent_id=None,
+                        agent_id=None,
                         user=request.user
                     )
                     ReceiptPayment.objects.create(receipt=receipt, transaction=txn)

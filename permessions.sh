@@ -189,3 +189,8 @@ Etudiant.objects.filter( gender='M',date_inscription=target_date).update(gender=
 Etudiant.objects.filter( gender='TMP',  date_inscription=target_date).update(gender='M')
 
 python manage.py fix_gender 
+
+
+rquet 
+SELECT setval('school_app_etudiant_id_seq', (SELECT MAX(id) FROM  public.school_app_etudiant
+));
