@@ -2775,7 +2775,8 @@ def unpaid_students(request):
         total_unpaid = Decimal("0.00")
         months_unpaid = []
 
-        start_date = max(student.date_inscription, academic_year.start_date)
+        # start_date = max(student.date_inscription, academic_year.start_date)
+        start_date = academic_year.start_date
         end_date = min(today, academic_year.end_date)
 
         # إذا كان التسجيل بعد يوم 15 نحسب من الشهر التالي
