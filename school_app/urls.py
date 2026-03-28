@@ -13,7 +13,6 @@ router.register(r'etudiants', EtudiantViewSet, basename="etudiant")
 router.register(r'activitys', ActivityViewSet, basename="activity")
 router.register(r'mois', MoisViewSet, basename="mois")
 router.register(r'paiements', PaiementViewSet, basename="paiement")
-
 router.register(r'bank-accounts', BankAccountViewSet, basename="bank-account")
 router.register(r'receipts', ReceiptViewSet, basename="receipt")
 router.register(r'receipts-payment', ReceiptPaymentViewSet, basename="receipt-payment")
@@ -53,6 +52,7 @@ router.register('participants', ParticipantViewSet, basename="participant")
 router.register('evaluations', EvaluationViewSet, basename="evaluation")
 router.register('competition-levels', CompetitionLevelViewSet, basename="competition-level")
 router.register('paiement-transations', PaiementTransationsViewSet, basename="paiement-transation")
+router.register('etudiant-certifieds', EtudiantCertifiedViewSet, basename="etudiant-certifieds")
 
 urlpatterns = [
     path('', include(router.urls)),

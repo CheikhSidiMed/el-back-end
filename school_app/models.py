@@ -9,6 +9,13 @@ from datetime import date
 from django.contrib.postgres.fields import JSONField 
 from django.db.models import JSONField
 from django.db.models import Max
+import uuid
+import os
+
+def upload_student_photo(instance, filename):
+    ext = filename.split('.')[-1]
+    filename = f"{uuid.uuid4()}.{ext}"
+    return os.path.join('etudiants/', filename)
 
 def get_default_academic_year():
     return AcademicYear.objects.order_by('-start_date').first()
@@ -1028,4 +1035,44 @@ class Evaluation(models.Model):
 
     def __str__(self):
         return f"{self.participant} - {self.juge}"
+
+class EtudiantCertified(models.Model):
+
+    TYPE_IJAZA_CHOICES = [
+        ('حافظ', 'حافظ'),
+        ('مجازي', 'مجازي'),
+    ]
+
+    TYPE_CHOICES = [
+        ('نافع', 'نافع'),
+        ('حفص', 'حفص'),
+        ('أخر', 'أخر'),
+    ]
+
+    full_name = models.CharField(max_length=255)
+    NNI = models.CharField(max_length=50)
+    phone = models.CharField(max_length=20)
+
+    date = models.DateField()
+    birth_date = models.DateField()
+
+    birth_city = models.CharField(max_length=255)
+
+    photo = models.ImageField(upload_to=upload_student_photo, null=True, blank=True)
+
+    year = models.PositiveIntegerField()
+
+    type_ijaza = models.CharField(
+        max_length=20,
+        choices=TYPE_IJAZA_CHOICES
+    )
+
+    type = models.CharField(
+        max_length=20,
+        choices=TYPE_CHOICES
+    )
+
+    def __str__(self):
+        return self.full_name
+
 

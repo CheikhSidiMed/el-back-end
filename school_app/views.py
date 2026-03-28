@@ -1,7 +1,7 @@
 from django.shortcuts import render
 from rest_framework import viewsets
 from rest_framework.response import Response
-from .models import Branche, Classe, Niveau, Agent, Receipt, SalaryPayment, ReceiptPayment, PaiementTransations, Exam, AbsElmhdara, Job, Inscription, Garant, GarantPaiement, Employee, Transaction, Etudiant, Mois, Paiement, BankAccount, Receipt, ReceiptPayment, Utilisateur, Activity, AcademicYear, MonthlyReport, DailyAbsence, AccountCategory, Account, Permission, Suspension, AbsenceActivity, Competition, Tasfiya, Juge, Participant, Evaluation, CompetitionLevel
+from .models import Branche, Classe, Niveau, Agent, Receipt, SalaryPayment, ReceiptPayment, PaiementTransations, Exam, AbsElmhdara, Job, Inscription, Garant, GarantPaiement, Employee, Transaction, Etudiant, Mois, Paiement, BankAccount, Receipt, ReceiptPayment, Utilisateur, Activity, AcademicYear, MonthlyReport, DailyAbsence, AccountCategory, Account, Permission, Suspension, AbsenceActivity, Competition, Tasfiya, Juge, Participant, Evaluation, CompetitionLevel, EtudiantCertified
 from .serializers import *
 from rest_framework_simplejwt.views import TokenObtainPairView
 from django.db import transaction
@@ -163,6 +163,11 @@ class ExamViewSet(viewsets.ModelViewSet):
     serializer_class = ExamSerializer
     filter_backends = [DjangoFilterBackend]
     # filterset_fields = ['branche']
+
+class EtudiantCertifiedViewSet(viewsets.ModelViewSet):
+    queryset = EtudiantCertified.objects.all()
+    serializer_class = EtudiantCertifiedSerializer
+    filter_backends = [DjangoFilterBackend]
 
 class AbsElmhdaraViewSet(viewsets.ModelViewSet):
     queryset = AbsElmhdara.objects.all()
@@ -1984,6 +1989,8 @@ class EvaluationViewSet(viewsets.ModelViewSet):
             queryset = queryset.filter(tasfiya_id=tasfiya)
 
         return queryset
+
+
 
 @api_view(['GET'])
 def daily_absence_list(request):
