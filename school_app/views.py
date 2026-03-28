@@ -2733,6 +2733,122 @@ def filter_transactions_account(request):
     })
 
 
+# @api_view(['GET'])
+# def unpaid_students(request):
+#     branch_id = request.GET.get('branch_id')
+#     class_id = request.GET.get('class_id')
+#     year_id = request.GET.get('year_id')
+#     month = request.GET.get('month')
+#     month = int(month) if month else None
+
+#     if not year_id:
+#         return Response({"error": "year_id est obligatoire"}, status=400)
+
+#     try:
+#         academic_year = AcademicYear.objects.get(id=year_id)
+#     except AcademicYear.DoesNotExist:
+#         return Response({"error": "année académique non trouvée"}, status=404)
+
+#     students = Etudiant.objects.filter(
+#         is_inscrire=1,
+#         payment_nature='mensuel',
+#         etat='inscrit', 
+#         is_active=True
+#     ).exclude(
+#         date_desectivation__isnull=False,
+#     )
+
+#     if branch_id:
+#         students = students.filter(branche_id=branch_id)
+#     if class_id:
+#         students = students.filter(classe_id=class_id)
+
+#     result = []
+#     today = date.today()
+
+#     for student in students:
+#         payments = Paiement.objects.filter(
+#             etudiant=student,
+#             academic_year=academic_year
+#         )
+
+#         total_unpaid = Decimal("0.00")
+#         months_unpaid = []
+
+#         # start_date = max(student.date_inscription, academic_year.start_date)
+#         start_date = academic_year.start_date
+#         end_date = min(today, academic_year.end_date)
+
+#         # إذا كان التسجيل بعد يوم 15 نحسب من الشهر التالي
+#         # if start_date.day > 15:
+#         #     if start_date.month == 12:
+#         #         current = date(start_date.year + 1, 1, 1)
+#         #     else:
+#         #         current = date(start_date.year, start_date.month + 1, 1)
+#         # else:
+#         #     current = date(start_date.year, start_date.month, 1)
+
+#         # current = date(start_date.year, start_date.month, 1)
+#         if start_date.month == 12:
+#             current = date(start_date.year + 1, 1, 1)
+#         else:
+#             current = date(start_date.year, start_date.month + 1, 1)
+
+#         while current <= end_date:
+#             month_number = current.month
+
+#             # 🔹 فلترة بالشهر إذا تم إرساله
+#             if month and month_number != month:
+#                 if current.month == 12:
+#                     current = date(current.year + 1, 1, 1)
+#                 else:
+#                     current = date(current.year, current.month + 1, 1)
+#                 continue
+
+#             month_name = ARABIC_MONTHS[month_number - 1]
+
+#             payments_for_month = payments.filter(month=month_number)
+
+#             # 🔑 S’IL Y A UN ENREGISTREMENT → ON FAIT CONFIANCE AU remaining_amount
+#             if payments_for_month.exists():
+#                 month_remaining = sum(
+#                     Decimal(p.remaining_amount or 0)
+#                     for p in payments_for_month
+#                 )
+#             else:
+#                 # Pas de paiement du tout → mois totalement impayé
+#                 month_remaining = Decimal(student.remaining or 0)
+
+#             if month_remaining > 0:
+#                 months_unpaid.append(month_name)
+#                 total_unpaid += month_remaining
+
+#             # mois suivant
+#             if current.month == 12:
+#                 current = date(current.year + 1, 1, 1)
+#             else:
+#                 current = date(current.year, current.month + 1, 1)
+
+#         if total_unpaid > 0:
+#             result.append({
+#                 "id": student.id,
+#                 "student_name": student.student_name,
+#                 "agent": {
+#                     "id": student.agent.id,
+#                     "name": student.agent.agent_name,
+#                     "phone": student.agent.phone
+#                 } if student.agent else None,
+#                 "branch_name": student.branche.nom,
+#                 "class_name": student.classe.nom,
+#                 "phone": student.agent.whatsapp_phone if student.agent and student.agent.whatsapp_phone else student.phone,
+#                 "months_unpaid": ", ".join(months_unpaid),
+#                 "unpaid_amount": float(total_unpaid),
+#                 "date_inscription": student.date_inscription,
+#             })
+
+#     return Response(result)
+
+
 @api_view(['GET'])
 def unpaid_students(request):
     branch_id = request.GET.get('branch_id')
@@ -2752,10 +2868,10 @@ def unpaid_students(request):
     students = Etudiant.objects.filter(
         is_inscrire=1,
         payment_nature='mensuel',
-        etat='inscrit', 
+        etat='inscrit',
         is_active=True
     ).exclude(
-        date_desectivation__isnull=False,
+        date_desectivation__isnull=False
     )
 
     if branch_id:
@@ -2775,59 +2891,52 @@ def unpaid_students(request):
         total_unpaid = Decimal("0.00")
         months_unpaid = []
 
-        # start_date = max(student.date_inscription, academic_year.start_date)
-        start_date = academic_year.start_date
+        # Date de départ : le mois d'inscription ou le début de l'année académique
+        start_date = max(student.date_inscription, academic_year.start_date)
         end_date = min(today, academic_year.end_date)
 
-        # إذا كان التسجيل بعد يوم 15 نحسب من الشهر التالي
-        # if start_date.day > 15:
-        #     if start_date.month == 12:
-        #         current = date(start_date.year + 1, 1, 1)
-        #     else:
-        #         current = date(start_date.year, start_date.month + 1, 1)
-        # else:
-        #     current = date(start_date.year, start_date.month, 1)
-
-        # current = date(start_date.year, start_date.month, 1)
-        if start_date.month == 12:
-            current = date(start_date.year + 1, 1, 1)
+        # Si inscription après le 15, commencer le mois suivant
+        if start_date.day > 15:
+            if start_date.month == 12:
+                current = date(start_date.year + 1, 1, 1)
+            else:
+                current = date(start_date.year, start_date.month + 1, 1)
         else:
-            current = date(start_date.year, start_date.month + 1, 1)
+            current = date(start_date.year, start_date.month, 1)
 
         while current <= end_date:
             month_number = current.month
 
-            # 🔹 فلترة بالشهر إذا تم إرساله
+            # Filtrage par mois si fourni
             if month and month_number != month:
-                if current.month == 12:
-                    current = date(current.year + 1, 1, 1)
-                else:
-                    current = date(current.year, current.month + 1, 1)
+                current = date(
+                    current.year + 1 if current.month == 12 else current.year,
+                    1 if current.month == 12 else current.month + 1,
+                    1
+                )
                 continue
 
             month_name = ARABIC_MONTHS[month_number - 1]
 
             payments_for_month = payments.filter(month=month_number)
 
-            # 🔑 S’IL Y A UN ENREGISTREMENT → ON FAIT CONFIANCE AU remaining_amount
+            # Si paiement existe, on utilise remaining_amount
             if payments_for_month.exists():
-                month_remaining = sum(
-                    Decimal(p.remaining_amount or 0)
-                    for p in payments_for_month
-                )
+                month_remaining = sum(Decimal(p.remaining_amount or 0) for p in payments_for_month)
             else:
-                # Pas de paiement du tout → mois totalement impayé
-                month_remaining = Decimal(student.remaining or 0)
+                # Aucun paiement → montant total du mois
+                month_remaining = Decimal(student.fees or 0)
 
             if month_remaining > 0:
                 months_unpaid.append(month_name)
                 total_unpaid += month_remaining
 
-            # mois suivant
-            if current.month == 12:
-                current = date(current.year + 1, 1, 1)
-            else:
-                current = date(current.year, current.month + 1, 1)
+            # Passer au mois suivant
+            current = date(
+                current.year + 1 if current.month == 12 else current.year,
+                1 if current.month == 12 else current.month + 1,
+                1
+            )
 
         if total_unpaid > 0:
             result.append({
@@ -2847,7 +2956,6 @@ def unpaid_students(request):
             })
 
     return Response(result)
-
 
 @api_view(['GET'])
 def unpaid_students_not_have_agent(request):
