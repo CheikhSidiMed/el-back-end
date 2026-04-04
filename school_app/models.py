@@ -309,6 +309,65 @@ class MonthlyReport(models.Model):
     def __str__(self):
         return f"{self.student.full_name} - {self.month} {self.year}"
 
+class QuarterlyReport(models.Model):
+    QUARTER_CHOICES = [
+        ('Q1', 'الفصل الأول'),
+        ('Q2', 'الفصل الثاني'),
+        ('Q3', 'الفصل الثالث'),
+        ('Q4', 'الفصل الرابع'),
+    ]
+    
+    student = models.ForeignKey(Etudiant, on_delete=models.CASCADE)
+
+    year = models.CharField(max_length=20)
+    quarter = models.CharField(max_length=2, choices=QUARTER_CHOICES)
+    # quarter = models.CharField(max_length=20)  # الفصل الأول / الثاني ...
+
+    # Month 1
+    month_1_income = models.IntegerField(default=0)
+    month_1_absence = models.IntegerField(default=0)
+
+    # Month 2
+    month_2_income = models.IntegerField(default=0)
+    month_2_absence = models.IntegerField(default=0)
+
+    # Month 3
+    month_3_income = models.IntegerField(default=0)
+    month_3_absence = models.IntegerField(default=0)
+
+    # Totals
+    total_income = models.IntegerField(default=0)
+    total_absence = models.IntegerField(default=0)
+
+    # Other fields
+    total_ahzab = models.IntegerField(default=0)  # عدد الأحزاب
+    extra = models.CharField(max_length=100, blank=True, null=True)  # زيادة المتون
+    remarks = models.TextField(blank=True, null=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ['student', 'quarter', 'year']
+
+    def save(self, *args, **kwargs):
+        # Auto-calculate totals
+        self.total_income = (
+            self.month_1_income +
+            self.month_2_income +
+            self.month_3_income
+        )
+
+        self.total_absence = (
+            self.month_1_absence +
+            self.month_2_absence +
+            self.month_3_absence
+        )
+
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.student.full_name} - {self.quarter} {self.year}"
+
 class DailyAbsence(models.Model):
     SESSION_CHOICES = [
         ('صباحًا', 'صباحًا'),

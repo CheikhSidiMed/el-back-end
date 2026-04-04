@@ -1,7 +1,7 @@
 from django.shortcuts import render
 from rest_framework import viewsets
 from rest_framework.response import Response
-from .models import Branche, Classe, Niveau, Agent, Receipt, SalaryPayment, ReceiptPayment, PaiementTransations, Exam, AbsElmhdara, Job, Inscription, Garant, GarantPaiement, Employee, Transaction, Etudiant, Mois, Paiement, BankAccount, Receipt, ReceiptPayment, Utilisateur, Activity, AcademicYear, MonthlyReport, DailyAbsence, AccountCategory, Account, Permission, Suspension, AbsenceActivity, Competition, Tasfiya, Juge, Participant, Evaluation, CompetitionLevel, EtudiantCertified
+from .models import Branche, Classe, Niveau, Agent, Receipt, SalaryPayment, ReceiptPayment, PaiementTransations, Exam, AbsElmhdara, Job, Inscription, Garant, GarantPaiement, Employee, Transaction, Etudiant, Mois, Paiement, BankAccount, Receipt, ReceiptPayment, Utilisateur, Activity, AcademicYear, MonthlyReport, DailyAbsence, AccountCategory, Account, Permission, Suspension, AbsenceActivity, Competition, Tasfiya, Juge, Participant, Evaluation, CompetitionLevel, EtudiantCertified, QuarterlyReport
 from .serializers import *
 from rest_framework_simplejwt.views import TokenObtainPairView
 from django.db import transaction
@@ -72,6 +72,13 @@ ARABIC_MONTHS = [
     "يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو",
     "يوليو", "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر"
 ]
+
+QUARTER_MONTHS = {
+    'Q1': ['أكتوبر', 'نوفمبر', 'ديسمبر'],
+    'Q2': ['يناير', 'فبراير', 'مارس'],
+    'Q3': ['أبريل', 'مايو', 'يونيو'],
+    'Q4': ['يوليو', 'أغسطس', 'سبتمبر'],
+}
 
 def calc_score(e):
     return round(
@@ -1392,48 +1399,6 @@ class MonthlyReportViewSet(viewsets.ModelViewSet):
             )
         return queryset
 
-    # @action(detail=False, methods=['get'], url_path='bulk-get')
-    # def bulk_get(self, request):
-    #     classe_id = request.query_params.get('classe')
-    #     month = request.query_params.get('month')
-    #     year = request.query_params.get('year')
-
-    #     # 1️⃣ التقارير الشهرية
-    #     reports = MonthlyReport.objects.filter(
-    #         student__classe_id=classe_id,
-    #         month=month,
-    #         year=year
-    #     )
-
-    #     # 2️⃣ الغياب الشهري (DailyAbsence)
-    #     month_d = MONTHS_AR_REVERSE.get(month)
-
-    #     absences = (
-    #         DailyAbsence.objects
-    #         .filter(
-    #             student__classe_id=classe_id,
-    #             date__month=month_d,
-    #             currentYear=year
-    #         )
-    #         .values('student_id')
-    #         .annotate(total_absence=Count('id'))
-    #     )
-
-    #     # 3️⃣ تحويل الغياب إلى dict
-    #     absence_map = {
-    #         a['student_id']: a['total_absence']
-    #         for a in absences
-    #     }
-
-    #     # 4️⃣ دمج البيانات
-    #     data = []
-    #     for report in reports:
-    #         serialized = MonthlyReportSerializer(report).data
-    #         serialized['absence'] = absence_map.get(report.student_id, 0)
-    #         data.append(serialized)
-
-    #     return Response(data)
-
     @action(detail=False, methods=['get'], url_path='bulk-get')
     def bulk_get(self, request):
         classe_id = request.query_params.get('classe')
@@ -1493,19 +1458,27 @@ class MonthlyReportViewSet(viewsets.ModelViewSet):
             # previous_level
             if prev_report:
                 serialized['previous_level'] = prev_report.current_level
+                if not serialized.get('memorization_amount'):
+                    serialized['memorization_amount'] = prev_report.memorization_amount
+                if not serialized.get('thmn'):
+                    serialized['thmn'] = prev_report.thmn
+                if not serialized.get('ahzab'):
+                    serialized['ahzab'] = prev_report.ahzab
             else:
                 serialized['previous_level'] = None
 
             # progress
             try:
-                current_total = int(report.ahzab or 0) + int(report.thmn or 0)
+                current_total = (int(report.ahzab or 0) * 8) + int(report.thmn or 0)
 
                 prev_total = 0
                 if prev_report:
-                    prev_total = int(prev_report.ahzab or 0) + int(prev_report.thmn or 0)
+                    prev_total = (int(prev_report.ahzab or 0) * 8) + int(prev_report.thmn or 0)
+                final_total = current_total if current_total != 0 else prev_total
+                progress = final_total - prev_total
 
-                progress = current_total - prev_total
                 serialized['progress'] = format_progress(progress)
+
 
             except:
                 serialized['progress'] = None
@@ -1614,36 +1587,162 @@ class MonthlyReportViewSet(viewsets.ModelViewSet):
             "data": result
         }, status=status.HTTP_200_OK)
 
-    # @action(detail=False, methods=['post'], url_path='bulk-save')
-    # def bulk_save(self, request):
-    #     reports = request.data  # liste
-    #     created = 0
-    #     updated = 0
+class QuarterlyReportViewSet(viewsets.ModelViewSet):
+    queryset = QuarterlyReport.objects.all()
+    serializer_class = QuarterlyReportSerializer
+    
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        student_id = self.request.query_params.get('student_id')
+        quarter = self.request.query_params.get('quarter')
+        year = self.request.query_params.get('year')
 
-    #     with transaction.atomic():
-    #         for data in reports:
-    #             obj, is_created = MonthlyReport.objects.update_or_create(
-    #                 student_id=data['student'],
-    #                 month=data['month'],
-    #                 year=data['year'],
-    #                 defaults={
-    #                     'ahzab': data['ahzab'],
-    #                     'thmn': data['thmn'],
-    #                     'memorization_amount': data['memorization_amount'],
-    #                     'previous_level': data['previous_level'],
-    #                     'current_level': data['current_level'],
-    #                     'progress': data['progress'],
-    #                     'absence': data['absence'],
-    #                     'remarks': data['remarks'],
-    #                 }
-    #             )
-    #             created += int(is_created)
-    #             updated += int(not is_created)
+        if student_id and quarter and year:
+            queryset = queryset.filter(
+                student_id=student_id,
+                quarter=quarter,
+                year=year
+            )
+        return queryset
 
-    #     return Response({
-    #         'created': created,
-    #         'updated': updated
-    #     }, status=status.HTTP_200_OK)
+    @action(detail=False, methods=['get'], url_path='bulk-get')
+    def bulk_get(self, request):
+        classe_id = request.query_params.get('classe')
+        quarter = request.query_params.get('quarter')
+        year = request.query_params.get('year')
+
+        months = QUARTER_MONTHS.get(quarter, [])
+
+        students = Etudiant.objects.filter(classe_id=classe_id)
+
+        data = []
+
+        quarterly_reports = QuarterlyReport.objects.filter(
+            student__classe_id=classe_id,
+            quarter=quarter,
+            year=year
+        )
+
+        quarter_map = {q.student_id: q for q in quarterly_reports}
+
+        for student in students:
+
+            monthly_reports = MonthlyReport.objects.filter(
+                student=student,
+                month__in=months,
+                year=year
+            )
+
+            report_map = {r.month: r for r in monthly_reports}
+
+            quarterly_reports = QuarterlyReport.objects.filter(
+                student__classe_id=classe_id,
+                quarter=quarter,
+                year=year
+            )
+
+            q_report = quarter_map.get(student.id)
+
+            print(q_report)
+            # --- Month values ---
+            month_values = []
+
+            for m in months:
+                r = report_map.get(m)
+
+                ahzab = int(r.ahzab or 0) if r else 0
+                thmn = int(r.thmn or 0) if r else 0
+
+                income = (ahzab * 8) + thmn
+
+                absence = int(r.absence or 0) if r else 0
+
+                month_values.append({
+                    "income": income,
+                    "absence": absence
+                })
+
+            # fill missing months (important)
+            while len(month_values) < 3:
+                month_values.append({"income": 0, "absence": 0})
+
+            total_income = sum(m["income"] for m in month_values)
+            total_absence = sum(m["absence"] for m in month_values)
+
+            data.append({
+                "student": student.id,
+                "student_name": student.full_name,
+
+                "month_1_income": format_progress(month_values[0]["income"]),
+                "month_1_absence": month_values[0]["absence"],
+
+                "month_2_income": format_progress(month_values[1]["income"]),
+                "month_2_absence": month_values[1]["absence"],
+
+                "month_3_income": format_progress(month_values[2]["income"]),
+                "month_3_absence": month_values[2]["absence"],
+
+                "total_income": format_progress(total_income),
+                "total_absence": total_absence,
+
+                "total_ahzab": q_report.total_ahzab if q_report else 0,
+                "extra": (q_report.extra or "") if q_report else "",
+                "remarks": (q_report.remarks or "") if q_report else ""
+
+            })
+
+        return Response(data)
+
+
+    @action(detail=False, methods=['post'], url_path='bulk-save')
+    def bulk_save(self, request):
+        reports = request.data
+
+        created = 0
+        updated = 0
+        saved_reports = []
+
+        with transaction.atomic():
+            for data in reports:
+
+                obj, is_created = QuarterlyReport.objects.update_or_create(
+                    student_id=data['student'],
+                    quarter=data['quarter'],
+                    year=data['year'],
+                    defaults={
+
+                        # -------- MONTH 1 --------
+                        # "month_1_income": int(data.get("month_1_income", 0)),
+                        # "month_1_absence": int(data.get("month_1_absence", 0)),
+
+                        # -------- MONTH 2 --------
+                        # "month_2_income": int(data.get("month_2_income", 0)),
+                        # "month_2_absence": int(data.get("month_2_absence", 0)),
+
+                        # -------- MONTH 3 --------
+                        # "month_3_income": int(data.get("month_3_income", 0)),
+                        # "month_3_absence": int(data.get("month_3_absence", 0)),
+
+                        # -------- EXTRA --------
+                        "total_ahzab": int(data.get("total_ahzab", 0)),
+                        "extra": data.get("extra", ""),
+                        "remarks": data.get("remarks", "")
+                    }
+                )
+
+                created += int(is_created)
+                updated += int(not is_created)
+
+                saved_reports.append(obj)
+
+        # 🔥 serialize result
+        serializer = QuarterlyReportSerializer(saved_reports, many=True)
+
+        return Response({
+            "created": created,
+            "updated": updated,
+            "data": serializer.data
+        }, status=status.HTTP_200_OK)
 
 class UtilisateurViewSet(viewsets.ModelViewSet):
     queryset = Utilisateur.objects.all()
