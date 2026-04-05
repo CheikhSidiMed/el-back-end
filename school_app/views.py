@@ -123,6 +123,23 @@ def format_progress(progress_thmn):
 
     return " و ".join(parts) if parts else "0"
 
+def get_previous_academic_year(year_str):
+    try:
+        start, end = year_str.split('-')
+        return f"{int(start)-1}-{int(end)-1}"
+    except:
+        return year_str
+
+#  Helper: previous month + academic year
+def get_previous_month_and_year(month, year):
+    month_num = MONTHS_AR_REVERSE.get(month)
+
+    if month_num == 1:
+        return MONTHS_AR[12], get_previous_academic_year(year)
+
+    return MONTHS_AR[month_num - 1], year
+
+
 class BrancheViewSet(viewsets.ModelViewSet):
     serializer_class = BrancheSerializer
     permission_classes = [IsAuthenticated]
@@ -130,20 +147,28 @@ class BrancheViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         user = self.request.user
 
-        # admin général → كل الفروع
+        # admin général
         if user.role and user.role.title == 'admin_g':
-            return Branche.objects.all()
+            queryset = Branche.objects.all()
 
-        # 🟢 ManyToMany: user.branches
-        if hasattr(user, 'branches'):
-            return user.branches.all()
+        elif hasattr(user, 'branches'):
+            queryset = user.branches.all()
 
-        # 🟡 ForeignKey: user.branche
-        if hasattr(user, 'branche') and user.branche:
-            return Branche.objects.filter(id=user.branche.id)
+        elif hasattr(user, 'branche') and user.branche:
+            queryset = Branche.objects.filter(id=user.branche.id)
 
-        # 🔴 لا يملك أي فرع
-        return Branche.objects.none()
+        else:
+            queryset = Branche.objects.none()
+
+        # ADD COUNTS
+        queryset = queryset.annotate(
+            total_inscrit=Count('etudiant', filter=Q(etudiant__etat='inscrit')),
+            total_suspendu=Count('etudiant', filter=Q(etudiant__etat='suspendu')),
+            total_en_attente=Count('etudiant', filter=Q(etudiant__etat='en_attente')),
+        )
+
+        return queryset
+
 
 class ClasseViewSet(viewsets.ModelViewSet):
     queryset = Classe.objects.all()
@@ -154,16 +179,24 @@ class ClasseViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         user = self.request.user
 
-        # admin général → كل الفروع
+        # admin général
         if user.role and user.role.title != 'teacher':
-            return Classe.objects.all()
+            queryset = Classe.objects.all()
 
-        # 🟡 ForeignKey: user.classe
-        if hasattr(user, 'classe') and user.classe:
-            return Classe.objects.filter(id=user.classe.id)
+        elif hasattr(user, 'classe') and user.classe:
+            queryset = Classe.objects.filter(id=user.classe.id)
 
-        # 🔴 لا يملك أي فرع
-        return Classe.objects.none()
+        else:
+            queryset = Classe.objects.none()
+
+        # ADD COUNTS
+        queryset = queryset.annotate(
+            total_inscrit=Count('etudiants', filter=Q(etudiants__etat='inscrit')),
+            total_suspendu=Count('etudiants', filter=Q(etudiants__etat='suspendu')),
+            total_en_attente=Count('etudiants', filter=Q(etudiants__etat='en_attente')),
+        )
+
+        return queryset
 
 class ExamViewSet(viewsets.ModelViewSet):
     queryset = Exam.objects.all()
@@ -1401,43 +1434,55 @@ class MonthlyReportViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['get'], url_path='bulk-get')
     def bulk_get(self, request):
+
         classe_id = request.query_params.get('classe')
         month = request.query_params.get('month')
         year = request.query_params.get('year')
+        student_id = request.query_params.get('student')
 
         month_num = MONTHS_AR_REVERSE.get(month)
+        prev_month, prev_year = get_previous_month_and_year(month, year)
 
-        # الشهر السابق
-        prev_month_num = 12 if month_num == 1 else month_num - 1
-        prev_month = MONTHS_AR[prev_month_num]
-
-        # التقارير الحالية
-        reports = MonthlyReport.objects.filter(
-            student__classe_id=classe_id,
-            month=month,
-            year=year
-        ).select_related('student')
-
-        # تقارير الشهر السابق
-        prev_reports = MonthlyReport.objects.filter(
-            student__classe_id=classe_id,
-            month=prev_month,
-            year=year
-        )
-
-        prev_map = {
-            r.student_id: r
-            for r in prev_reports
+        # =========================
+        # BASE FILTER
+        # =========================
+        base_filter = {
+            "student__classe_id": classe_id,
+            "month": month,
+            "year": year
         }
 
-        # الغياب
+        prev_filter = {
+            "student__classe_id": classe_id,
+            "month": prev_month,
+            "year": prev_year
+        }
+
+        absence_filter = {
+            "student__classe_id": classe_id,
+            "date__month": month_num,
+            "currentYear": year
+        }
+
+        # =========================
+        #  APPLY STUDENT FILTER
+        # =========================
+        if student_id:
+            base_filter["student_id"] = student_id
+            prev_filter["student_id"] = student_id
+            absence_filter["student_id"] = student_id
+
+        # -------- CURRENT REPORTS --------
+        reports = MonthlyReport.objects.filter(**base_filter).select_related('student')
+
+        # -------- PREVIOUS REPORTS --------
+        prev_reports = MonthlyReport.objects.filter(**prev_filter)
+        prev_map = {r.student_id: r for r in prev_reports}
+
+        # -------- ABSENCES --------
         absences = (
             DailyAbsence.objects
-            .filter(
-                student__classe_id=classe_id,
-                date__month=month_num,
-                currentYear=year
-            )
+            .filter(**absence_filter)
             .values('student_id')
             .annotate(total_absence=Count('id'))
         )
@@ -1449,47 +1494,53 @@ class MonthlyReportViewSet(viewsets.ModelViewSet):
 
         data = []
 
+        # =========================
+        # LOOP
+        # =========================
         for report in reports:
 
             serialized = MonthlyReportSerializer(report).data
-
             prev_report = prev_map.get(report.student_id)
 
-            # previous_level
+            # -------- PREVIOUS LEVEL --------
             if prev_report:
                 serialized['previous_level'] = prev_report.current_level
+
                 if not serialized.get('memorization_amount'):
                     serialized['memorization_amount'] = prev_report.memorization_amount
+
                 if not serialized.get('thmn'):
                     serialized['thmn'] = prev_report.thmn
+
                 if not serialized.get('ahzab'):
                     serialized['ahzab'] = prev_report.ahzab
             else:
                 serialized['previous_level'] = None
 
-            # progress
+            # -------- PROGRESS --------
             try:
                 current_total = (int(report.ahzab or 0) * 8) + int(report.thmn or 0)
 
                 prev_total = 0
                 if prev_report:
                     prev_total = (int(prev_report.ahzab or 0) * 8) + int(prev_report.thmn or 0)
+
                 final_total = current_total if current_total != 0 else prev_total
                 progress = final_total - prev_total
 
                 serialized['progress'] = format_progress(progress)
 
-
             except:
                 serialized['progress'] = None
 
-            # absence
+            # -------- ABSENCE --------
             serialized['absence'] = absence_map.get(report.student_id, 0)
 
             data.append(serialized)
 
         return Response(data)
 
+    
     @action(detail=False, methods=['post'], url_path='bulk-save')
     def bulk_save(self, request):
         reports = request.data

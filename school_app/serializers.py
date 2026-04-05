@@ -4,9 +4,20 @@ from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
 
 class BrancheSerializer(serializers.ModelSerializer):
+    total_inscrit = serializers.IntegerField(read_only=True)
+    total_suspendu = serializers.IntegerField(read_only=True)
+    total_en_attente = serializers.IntegerField(read_only=True)
+
     class Meta:
         model = Branche
-        fields = '__all__'
+        fields = [
+            'id',
+            'nom',
+            'adresse',
+            'total_inscrit',
+            'total_suspendu',
+            'total_en_attente'
+        ]
 
 class ExamSerializer(serializers.ModelSerializer):
     class Meta:
@@ -69,22 +80,34 @@ class EmployeeSerializer(serializers.ModelSerializer):
         return employee
 
 class ClasseSerializer(serializers.ModelSerializer):
-    employees = EmployeeSerializer(many=True, read_only=True)  # relation reverse
-
-    # → visible UNIQUEMENT dans la réponse (GET)
+    employees = EmployeeSerializer(many=True, read_only=True)
     branche = BrancheSerializer(read_only=True)
 
-    # → utilisé UNIQUEMENT à la création / mise à jour (POST / PATCH)
     branche_id = serializers.PrimaryKeyRelatedField(
-        source='branche',                 # fait le lien avec le FK `branche`
+        source='branche',
         queryset=Branche.objects.all(),
         write_only=True
     )
 
+    total_inscrit = serializers.IntegerField(read_only=True)
+    total_suspendu = serializers.IntegerField(read_only=True)
+    total_en_attente = serializers.IntegerField(read_only=True)
+
     class Meta:
         model = Classe
-        fields = ['id', 'nom', 'niveau', 'branche', 'branche_id', 'employees']
+        fields = [
+            'id',
+            'nom',
+            'niveau',
+            'branche',
+            'branche_id',
+            'employees',
 
+            'total_inscrit',
+            'total_suspendu',
+            'total_en_attente',
+        ]
+        
 class EtudiantSerializer(serializers.ModelSerializer):
     level = NiveauSerializer(read_only=True)
     classe = ClasseSerializer(read_only=True)
