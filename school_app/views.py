@@ -3129,14 +3129,28 @@ def unpaid_students(request):
 
             month_name = ARABIC_MONTHS[month_number - 1]
 
-            payments_for_month = payments.filter(month=month_number)
+            payments_for_month = payments.filter(
+                month=month_number,
+                academic_year=academic_year
+            )
 
             # Si paiement existe, on utilise remaining_amount
-            if payments_for_month.exists():
-                month_remaining = sum(Decimal(p.remaining_amount or 0) for p in payments_for_month)
+            # if payments_for_month.exists():
+            #     month_remaining = sum(Decimal(p.remaining_amount or 0) for p in payments_for_month)
+            # else:
+            #     # Aucun paiement → montant total du mois
+            #     month_remaining = Decimal(student.remaining or 0)
+
+            month_fee = Decimal(student.month_fee or 0)
+
+            payments_for_month = payments.filter(month=month_number)
+
+            total_paid = sum(Decimal(p.paid_amount or 0) for p in payments_for_month)
+
+            if total_paid < month_fee:
+                month_remaining = month_fee - total_paid
             else:
-                # Aucun paiement → montant total du mois
-                month_remaining = Decimal(student.fees or 0)
+                month_remaining = Decimal("0.00")
 
             if month_remaining > 0:
                 months_unpaid.append(month_name)
@@ -3356,11 +3370,22 @@ def unpaid_students_not_have_agent(request):
 
             payments_for_month = payments.filter(month=month_number)
 
-            if payments_for_month.exists():
-                month_remaining = sum(Decimal(p.remaining_amount or 0) for p in payments_for_month)
+            # if payments_for_month.exists():
+            #     month_remaining = sum(Decimal(p.remaining_amount or 0) for p in payments_for_month)
+            # else:
+            #     # Aucun paiement → utiliser le montant restant général
+            #     month_remaining = Decimal(student.remaining or 0)
+
+            month_fee = Decimal(student.month_fee or 0)
+
+            payments_for_month = payments.filter(month=month_number)
+
+            total_paid = sum(Decimal(p.paid_amount or 0) for p in payments_for_month)
+
+            if total_paid < month_fee:
+                month_remaining = month_fee - total_paid
             else:
-                # Aucun paiement → utiliser le montant restant général
-                month_remaining = Decimal(student.remaining or 0)
+                month_remaining = Decimal("0.00")
 
             if month_remaining > 0:
                 months_unpaid.append(month_name)
@@ -3458,10 +3483,21 @@ def unpaid_by_agent(request):
 
             payments_for_month = payments.filter(month=month_number)
 
-            if payments_for_month.exists():
-                month_remaining = sum(Decimal(p.remaining_amount or 0) for p in payments_for_month)
+            # if payments_for_month.exists():
+            #     month_remaining = sum(Decimal(p.remaining_amount or 0) for p in payments_for_month)
+            # else:
+            #     month_remaining = Decimal(student.remaining or 0)
+
+            month_fee = Decimal(student.month_fee or 0)
+
+            payments_for_month = payments.filter(month=month_number)
+
+            total_paid = sum(Decimal(p.paid_amount or 0) for p in payments_for_month)
+
+            if total_paid < month_fee:
+                month_remaining = month_fee - total_paid
             else:
-                month_remaining = Decimal(student.remaining or 0)
+                month_remaining = Decimal("0.00")
 
             if month_remaining > 0:
                 months_unpaid.append(month_name)
