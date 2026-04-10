@@ -85,7 +85,6 @@ urlpatterns = [
     path('participants-autocomplite/', participants_autocomplete, name='participants-autocomplite'),
     path('participants-list/', participants_list, name='participants-lists'),
     path('get-last-receipt/', get_last_receipt, name='get-last-receipt'),
-    path('get-last-agent-receipt/', get_last_agent_receipt, name='get-last-agent-receipt'),
 
 
 ]

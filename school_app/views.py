@@ -139,6 +139,10 @@ def get_previous_month_and_year(month, year):
 
     return MONTHS_AR[month_num - 1], year
 
+def calculate_progress(current, previous):
+    current_total = (int(current.ahzab or 0) * 8) + int(current.thmn or 0)
+    prev_total = (int(previous.ahzab or 0) * 8) + int(previous.thmn or 0) if previous else 0
+    return format_progress(current_total - prev_total)
 
 class BrancheViewSet(viewsets.ModelViewSet):
     serializer_class = BrancheSerializer
@@ -168,7 +172,6 @@ class BrancheViewSet(viewsets.ModelViewSet):
         )
 
         return queryset
-
 
 class ClasseViewSet(viewsets.ModelViewSet):
     queryset = Classe.objects.all()
@@ -292,13 +295,83 @@ class EtudiantViewSet(viewsets.ModelViewSet):
         response_serializer = self.get_serializer(instance)
         return Response(response_serializer.data, status=status.HTTP_201_CREATED)
 
-    # def create(self, request, *args, **kwargs):
-    #     serializer = self.get_serializer(data=request.data)
-    #     if not serializer.is_valid():
-    #         print("Validation Error:", serializer.errors)
-    #         return Response(serializer.errors, status=400)
-    #     self.perform_create(serializer)
-    #     return Response(serializer.data, status=201)
+    @action(detail=False, methods=['get'], url_path='etudiants-search-custem')
+    def etudiants_search_custom(self, request):
+
+        search = request.query_params.get('search', '').strip()
+        page = int(request.query_params.get('page', 1))
+        page_size = int(request.query_params.get('page_size', 10))
+
+        queryset = (
+            Etudiant.objects
+            .select_related('agent', 'classe', 'branche')  # مهم للأداء
+            .filter(is_active=True)
+        )
+
+        # =========================
+        # 🔍 SMART SEARCH
+        # =========================
+        if search:
+            terms = search.split()
+
+            query = Q()
+            for term in terms:
+                query &= (
+                    Q(student_name__icontains=term) |
+                    Q(phone__icontains=term) |
+                    Q(agent__agent_name__icontains=term) |
+                    Q(agent__phone__icontains=term) |
+                    Q(agent__phone_2__icontains=term) |
+                    Q(agent__whatsapp_phone__icontains=term)
+                )
+
+            queryset = queryset.filter(query)
+
+        # =========================
+        # ORDERING
+        # =========================
+        queryset = queryset.order_by('student_name')
+
+        # =========================
+        # PAGINATION
+        # =========================
+        total = queryset.count()
+        start = (page - 1) * page_size
+        end = start + page_size
+
+        results = queryset[start:end]
+
+        # =========================
+        # 🔥 CUSTOM RESPONSE (NO HEAVY SERIALIZER)
+        # =========================
+        data = [
+            {
+                "id": e.id,
+                "student_name": e.student_name,
+                "phone": e.phone,
+                "classe_name": e.classe.nom if e.classe else None,
+                "classe": {
+                    "id": e.classe.id,
+                    "nom": e.classe.nom,
+                    "employees": [
+                        {
+                            "id": emp.id,
+                            "full_name": emp.full_name
+                        }
+                        for emp in e.classe.employees.all()
+                    ]
+                } if e.classe else None,
+                "branche_name": e.branche.nom if e.branche else None,
+            }
+            for e in results
+        ]
+
+        return Response({
+            "count": total,
+            "page": page,
+            "page_size": page_size,
+            "results": data
+        }, status=status.HTTP_200_OK)
 
 class MoisViewSet(viewsets.ModelViewSet):
     queryset = Mois.objects.all()
@@ -1465,7 +1538,7 @@ class MonthlyReportViewSet(viewsets.ModelViewSet):
         }
 
         # =========================
-        #  APPLY STUDENT FILTER
+        # APPLY STUDENT FILTER
         # =========================
         if student_id:
             base_filter["student_id"] = student_id
@@ -1473,7 +1546,13 @@ class MonthlyReportViewSet(viewsets.ModelViewSet):
             absence_filter["student_id"] = student_id
 
         # -------- CURRENT REPORTS --------
-        reports = MonthlyReport.objects.filter(**base_filter).select_related('student')
+        reports_qs = MonthlyReport.objects.filter(**base_filter).select_related('student')
+
+        # -------- SERIALIZE ONCE --------
+        serialized_data = MonthlyReportSerializer(reports_qs, many=True).data
+
+        # -------- MAP REPORTS --------
+        reports_map = {r.id: r for r in reports_qs}
 
         # -------- PREVIOUS REPORTS --------
         prev_reports = MonthlyReport.objects.filter(**prev_filter)
@@ -1495,27 +1574,27 @@ class MonthlyReportViewSet(viewsets.ModelViewSet):
         data = []
 
         # =========================
-        # LOOP
+        # LOOP (LIGHTWEIGHT)
         # =========================
-        for report in reports:
+        for item in serialized_data:
 
-            serialized = MonthlyReportSerializer(report).data
+            report = reports_map.get(item['id'])
             prev_report = prev_map.get(report.student_id)
 
             # -------- PREVIOUS LEVEL --------
             if prev_report:
-                serialized['previous_level'] = prev_report.current_level
+                item['previous_level'] = prev_report.current_level
 
-                if not serialized.get('memorization_amount'):
-                    serialized['memorization_amount'] = prev_report.memorization_amount
+                if not item.get('memorization_amount'):
+                    item['memorization_amount'] = prev_report.memorization_amount
 
-                if not serialized.get('thmn'):
-                    serialized['thmn'] = prev_report.thmn
+                if not item.get('thmn'):
+                    item['thmn'] = prev_report.thmn
 
-                if not serialized.get('ahzab'):
-                    serialized['ahzab'] = prev_report.ahzab
+                if not item.get('ahzab'):
+                    item['ahzab'] = prev_report.ahzab
             else:
-                serialized['previous_level'] = None
+                item['previous_level'] = None
 
             # -------- PROGRESS --------
             try:
@@ -1528,18 +1607,18 @@ class MonthlyReportViewSet(viewsets.ModelViewSet):
                 final_total = current_total if current_total != 0 else prev_total
                 progress = final_total - prev_total
 
-                serialized['progress'] = format_progress(progress)
+                item['progress'] = format_progress(progress)
 
-            except:
-                serialized['progress'] = None
+            except Exception as e:
+                print("Progress error:", str(e))
+                item['progress'] = None
 
             # -------- ABSENCE --------
-            serialized['absence'] = absence_map.get(report.student_id, 0)
+            item['absence'] = absence_map.get(report.student_id, 0)
 
-            data.append(serialized)
+            data.append(item)
 
         return Response(data)
-
     
     @action(detail=False, methods=['post'], url_path='bulk-save')
     def bulk_save(self, request):
@@ -1556,8 +1635,8 @@ class MonthlyReportViewSet(viewsets.ModelViewSet):
                     month=data['month'],
                     year=data['year'],
                     defaults={
-                        'ahzab': data['ahzab'],
-                        'thmn': data['thmn'],
+                        'ahzab': data.get('ahzab', 0),
+                        'thmn': data.get('thmn', 0),
                         'memorization_amount': data['memorization_amount'],
                         'previous_level': data['previous_level'],
                         'current_level': data['current_level'],
@@ -1573,15 +1652,18 @@ class MonthlyReportViewSet(viewsets.ModelViewSet):
                 saved_reports.append(obj)
 
         # -------- نفس منطق bulk_get --------
+        if not saved_reports:
+            return Response({"created": 0, "updated": 0, "data": []})
         classe_id = saved_reports[0].student.classe_id
         month = saved_reports[0].month
         year = saved_reports[0].year
 
         month_num = MONTHS_AR_REVERSE.get(month)
 
-        prev_month_num = 12 if month_num == 1 else month_num - 1
-        prev_month = MONTHS_AR[prev_month_num]
-
+        # prev_month_num = 12 if month_num == 1 else month_num - 1
+        # prev_month = MONTHS_AR[prev_month_num]
+        prev_month, prev_year = get_previous_month_and_year(month, year)
+        print(classe_id, 'classe_id')
         prev_reports = MonthlyReport.objects.filter(
             student__classe_id=classe_id,
             month=prev_month,
@@ -1612,11 +1694,12 @@ class MonthlyReportViewSet(viewsets.ModelViewSet):
             prev_report = prev_map.get(report.student_id)
 
             # previous level
-            serialized['previous_level'] = prev_report.current_level if prev_report else None
+            # serialized['previous_level'] = prev_report.current_level if prev_report else None
 
             # progress
             try:
-                current_total = int(report.ahzab or 0) + int(report.thmn or 0)
+                # current_total = int(report.ahzab or 0) + int(report.thmn or 0)
+                current_total = (int(report.ahzab or 0) * 8) + int(report.thmn or 0)
                 prev_total = 0
 
                 if prev_report:
@@ -1626,6 +1709,7 @@ class MonthlyReportViewSet(viewsets.ModelViewSet):
                 serialized['progress'] = format_progress(progress)
 
             except:
+                print("Progress error:", str(e))
                 serialized['progress'] = None
 
             serialized['absence'] = absence_map.get(report.student_id, 0)
@@ -1743,7 +1827,6 @@ class QuarterlyReportViewSet(viewsets.ModelViewSet):
             })
 
         return Response(data)
-
 
     @action(detail=False, methods=['post'], url_path='bulk-save')
     def bulk_save(self, request):
@@ -2944,122 +3027,6 @@ def filter_transactions_account(request):
     })
 
 
-# @api_view(['GET'])
-# def unpaid_students(request):
-#     branch_id = request.GET.get('branch_id')
-#     class_id = request.GET.get('class_id')
-#     year_id = request.GET.get('year_id')
-#     month = request.GET.get('month')
-#     month = int(month) if month else None
-
-#     if not year_id:
-#         return Response({"error": "year_id est obligatoire"}, status=400)
-
-#     try:
-#         academic_year = AcademicYear.objects.get(id=year_id)
-#     except AcademicYear.DoesNotExist:
-#         return Response({"error": "année académique non trouvée"}, status=404)
-
-#     students = Etudiant.objects.filter(
-#         is_inscrire=1,
-#         payment_nature='mensuel',
-#         etat='inscrit', 
-#         is_active=True
-#     ).exclude(
-#         date_desectivation__isnull=False,
-#     )
-
-#     if branch_id:
-#         students = students.filter(branche_id=branch_id)
-#     if class_id:
-#         students = students.filter(classe_id=class_id)
-
-#     result = []
-#     today = date.today()
-
-#     for student in students:
-#         payments = Paiement.objects.filter(
-#             etudiant=student,
-#             academic_year=academic_year
-#         )
-
-#         total_unpaid = Decimal("0.00")
-#         months_unpaid = []
-
-#         # start_date = max(student.date_inscription, academic_year.start_date)
-#         start_date = academic_year.start_date
-#         end_date = min(today, academic_year.end_date)
-
-#         # إذا كان التسجيل بعد يوم 15 نحسب من الشهر التالي
-#         # if start_date.day > 15:
-#         #     if start_date.month == 12:
-#         #         current = date(start_date.year + 1, 1, 1)
-#         #     else:
-#         #         current = date(start_date.year, start_date.month + 1, 1)
-#         # else:
-#         #     current = date(start_date.year, start_date.month, 1)
-
-#         # current = date(start_date.year, start_date.month, 1)
-#         if start_date.month == 12:
-#             current = date(start_date.year + 1, 1, 1)
-#         else:
-#             current = date(start_date.year, start_date.month + 1, 1)
-
-#         while current <= end_date:
-#             month_number = current.month
-
-#             # 🔹 فلترة بالشهر إذا تم إرساله
-#             if month and month_number != month:
-#                 if current.month == 12:
-#                     current = date(current.year + 1, 1, 1)
-#                 else:
-#                     current = date(current.year, current.month + 1, 1)
-#                 continue
-
-#             month_name = ARABIC_MONTHS[month_number - 1]
-
-#             payments_for_month = payments.filter(month=month_number)
-
-#             # 🔑 S’IL Y A UN ENREGISTREMENT → ON FAIT CONFIANCE AU remaining_amount
-#             if payments_for_month.exists():
-#                 month_remaining = sum(
-#                     Decimal(p.remaining_amount or 0)
-#                     for p in payments_for_month
-#                 )
-#             else:
-#                 # Pas de paiement du tout → mois totalement impayé
-#                 month_remaining = Decimal(student.remaining or 0)
-
-#             if month_remaining > 0:
-#                 months_unpaid.append(month_name)
-#                 total_unpaid += month_remaining
-
-#             # mois suivant
-#             if current.month == 12:
-#                 current = date(current.year + 1, 1, 1)
-#             else:
-#                 current = date(current.year, current.month + 1, 1)
-
-#         if total_unpaid > 0:
-#             result.append({
-#                 "id": student.id,
-#                 "student_name": student.student_name,
-#                 "agent": {
-#                     "id": student.agent.id,
-#                     "name": student.agent.agent_name,
-#                     "phone": student.agent.phone
-#                 } if student.agent else None,
-#                 "branch_name": student.branche.nom,
-#                 "class_name": student.classe.nom,
-#                 "phone": student.agent.whatsapp_phone if student.agent and student.agent.whatsapp_phone else student.phone,
-#                 "months_unpaid": ", ".join(months_unpaid),
-#                 "unpaid_amount": float(total_unpaid),
-#                 "date_inscription": student.date_inscription,
-#             })
-
-#     return Response(result)
-
-
 @api_view(['GET'])
 def unpaid_students(request):
     branch_id = request.GET.get('branch_id')
@@ -3134,17 +3101,8 @@ def unpaid_students(request):
                 academic_year=academic_year
             )
 
-            # Si paiement existe, on utilise remaining_amount
-            # if payments_for_month.exists():
-            #     month_remaining = sum(Decimal(p.remaining_amount or 0) for p in payments_for_month)
-            # else:
-            #     # Aucun paiement → montant total du mois
-            #     month_remaining = Decimal(student.remaining or 0)
-
             month_fee = Decimal(student.remaining or 0)
-
             payments_for_month = payments.filter(month=month_number)
-
             total_paid = sum(Decimal(p.paid_amount or 0) for p in payments_for_month)
 
             if total_paid < month_fee:
@@ -3181,123 +3139,6 @@ def unpaid_students(request):
             })
 
     return Response(result)
-
-
-# @api_view(['GET'])
-# def unpaid_students_not_have_agent(request):
-#     branch_id = request.GET.get('branch_id')
-#     class_id = request.GET.get('class_id')
-#     year_id = request.GET.get('year_id')
-#     month = request.GET.get('month')
-#     month = int(month) if month else None
-
-#     if not year_id:
-#         return Response({"error": "year_id est obligatoire"}, status=400)
-
-#     try:
-#         academic_year = AcademicYear.objects.get(id=year_id)
-#     except AcademicYear.DoesNotExist:
-#         return Response({"error": "année académique non trouvée"}, status=404)
-
-#     students = Etudiant.objects.filter(
-#         is_inscrire=1,
-#         payment_nature='mensuel',
-#         etat='inscrit', 
-#         is_active=True,
-#         agent__isnull=True
-#     ).exclude(
-#         date_desectivation__isnull=False,
-#     )
-
-#     if branch_id:
-#         students = students.filter(branche_id=branch_id)
-#     if class_id:
-#         students = students.filter(classe_id=class_id)
-
-#     result = []
-#     today = date.today()
-
-#     for student in students:
-#         payments = Paiement.objects.filter(
-#             etudiant=student,
-#             academic_year=academic_year
-#         )
-
-#         total_unpaid = Decimal("0.00")
-#         months_unpaid = []
-
-#         start_date = max(student.date_inscription, academic_year.start_date)
-#         end_date = min(today, academic_year.end_date)
-
-#         # إذا كان التسجيل بعد يوم 15 نحسب من الشهر التالي
-#         # if start_date.day > 15:
-#         #     if start_date.month == 12:
-#         #         current = date(start_date.year + 1, 1, 1)
-#         #     else:
-#         #         current = date(start_date.year, start_date.month + 1, 1)
-#         # else:
-#         #     current = date(start_date.year, start_date.month, 1)
-
-#         # current = date(start_date.year, start_date.month, 1)
-#         if start_date.month == 12:
-#             current = date(start_date.year + 1, 1, 1)
-#         else:
-#             current = date(start_date.year, start_date.month + 1, 1)
-
-#         while current <= end_date:
-#             month_number = current.month
-
-#             # 🔹 فلترة بالشهر إذا تم إرساله
-#             if month and month_number != month:
-#                 if current.month == 12:
-#                     current = date(current.year + 1, 1, 1)
-#                 else:
-#                     current = date(current.year, current.month + 1, 1)
-#                 continue
-
-#             month_name = ARABIC_MONTHS[month_number - 1]
-
-#             payments_for_month = payments.filter(month=month_number)
-
-#             # 🔑 S’IL Y A UN ENREGISTREMENT → ON FAIT CONFIANCE AU remaining_amount
-#             if payments_for_month.exists():
-#                 month_remaining = sum(
-#                     Decimal(p.remaining_amount or 0)
-#                     for p in payments_for_month
-#                 )
-#             else:
-#                 # Pas de paiement du tout → mois totalement impayé
-#                 month_remaining = Decimal(student.remaining or 0)
-
-#             if month_remaining > 0:
-#                 months_unpaid.append(month_name)
-#                 total_unpaid += month_remaining
-
-#             # mois suivant
-#             if current.month == 12:
-#                 current = date(current.year + 1, 1, 1)
-#             else:
-#                 current = date(current.year, current.month + 1, 1)
-
-#         if total_unpaid > 0:
-#             result.append({
-#                 "id": student.id,
-#                 "student_name": student.student_name,
-#                 "agent": {
-#                     "id": student.agent.id,
-#                     "name": student.agent.agent_name,
-#                     "phone": student.agent.phone
-#                 } if student.agent else None,
-#                 "branch_name": student.branche.nom,
-#                 "class_name": student.classe.nom,
-#                 "phone": student.agent.whatsapp_phone if student.agent and student.agent.whatsapp_phone else student.phone,
-#                 "months_unpaid": ", ".join(months_unpaid),
-#                 "unpaid_amount": float(total_unpaid),
-#                 "date_inscription": student.date_inscription,
-#             })
-
-#     return Response(result)
-
 
 
 @api_view(['GET'])
@@ -3414,8 +3255,6 @@ def unpaid_students_not_have_agent(request):
     return Response(result)
 
 
-
-
 @api_view(['GET'])
 def unpaid_by_agent(request):
     year_id = request.GET.get('year_id')
@@ -3528,104 +3367,6 @@ def unpaid_by_agent(request):
             })
 
     return Response(list(agents.values()))
-
-
-# @api_view(['GET'])
-# def unpaid_by_agent(request):
-
-#     year_id = request.GET.get('year_id')
-#     month = request.GET.get('month')
-
-#     if month in [None, "", "null", "undefined"]:
-#         month = None
-#     else:
-#         month = int(month)
-
-#     if not year_id:
-#         return Response({"error": "year_id est obligatoire"}, status=400)
-
-#     try:
-#         academic_year = AcademicYear.objects.get(id=year_id)
-#     except AcademicYear.DoesNotExist:
-#         return Response({"error": "année académique non trouvée"}, status=404)
-
-#     students = Etudiant.objects.filter(
-#         is_inscrire=1,
-#         payment_nature='mensuel',
-#         etat='inscrit',
-#         is_active=True
-#     ).exclude(
-#         date_desectivation__isnull=False
-#     ).select_related('agent')
-
-#     agents = {}
-#     today = date.today()
-
-#     for student in students:
-
-#         payments = Paiement.objects.filter(
-#             etudiant=student,
-#             academic_year=academic_year
-#         )
-
-#         total_unpaid = Decimal("0.00")
-#         months_unpaid = []
-
-#         start_date = max(student.date_inscription, academic_year.start_date)
-#         end_date = min(today, academic_year.end_date)
-
-#         if start_date.month == 12:
-#             current = date(start_date.year + 1, 1, 1)
-#         else:
-#             current = date(start_date.year, start_date.month + 1, 1)
-
-#         while current <= end_date:
-
-#             month_number = current.month
-
-#             if month and month_number != month:
-#                 current = date(current.year + (current.month // 12), (current.month % 12) + 1, 1)
-#                 continue
-
-#             month_name = ARABIC_MONTHS[month_number - 1]
-
-#             payments_for_month = payments.filter(month=month_number)
-
-#             if payments_for_month.exists():
-#                 month_remaining = sum(
-#                     Decimal(p.remaining_amount or 0)
-#                     for p in payments_for_month
-#                 )
-#             else:
-#                 month_remaining = Decimal(student.remaining or 0)
-
-#             if month_remaining > 0:
-#                 months_unpaid.append(month_name)
-#                 total_unpaid += month_remaining
-
-#             current = date(current.year + (current.month // 12), (current.month % 12) + 1, 1)
-
-#         if total_unpaid > 0 and student.agent:
-
-#             agent_id = student.agent.id
-
-#             if agent_id not in agents:
-#                 agents[agent_id] = {
-#                     "agent_id": agent_id,
-#                     "agent_name": student.agent.agent_name,
-#                     "agent_phone": student.agent.phone,
-#                     "students": []
-#                 }
-
-#             agents[agent_id]["students"].append({
-#                 "student_name": student.student_name,
-#                 "phone": student.agent.whatsapp_phone if student.agent and student.agent.whatsapp_phone else student.phone,
-#                 "months_unpaid": ", ".join(months_unpaid),
-#                 "unpaid_amount": float(total_unpaid),
-#                 "date_inscription": student.date_inscription
-#             })
-
-#     return Response(list(agents.values()))
 
 
 @api_view(['GET'])
@@ -4006,4 +3747,4 @@ def get_last_agent_receipt(request):
 
     return Response(data)
 
-        
+    
