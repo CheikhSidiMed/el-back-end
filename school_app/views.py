@@ -282,7 +282,6 @@ class EtudiantViewSet(viewsets.ModelViewSet):
 
         return queryset
 
-
     @transaction.atomic
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
@@ -307,6 +306,17 @@ class EtudiantViewSet(viewsets.ModelViewSet):
             .select_related('agent', 'classe', 'branche')  # مهم للأداء
             .filter(is_active=True)
         )
+
+        user = request.user
+
+        if (
+            user.role 
+            and user.role.title == 'teacher' 
+            and user.classe
+        ):
+            queryset = queryset.filter(
+                classe=user.classe
+            ).distinct()
 
         # =========================
         # 🔍 SMART SEARCH
@@ -1745,23 +1755,54 @@ class QuarterlyReportViewSet(viewsets.ModelViewSet):
         classe_id = request.query_params.get('classe')
         quarter = request.query_params.get('quarter')
         year = request.query_params.get('year')
+        student_id = request.query_params.get('student')
+
+        # =========================
+        # VALIDATION
+        # =========================
+        if not student_id and not classe_id:
+            return Response(
+                {"error": "classe or student is required"},
+                status=400
+            )
 
         months = QUARTER_MONTHS.get(quarter, [])
 
-        students = Etudiant.objects.filter(classe_id=classe_id)
+        # =========================
+        # STUDENTS
+        # =========================
+        if student_id:
+            students = Etudiant.objects.filter(id=student_id)
+        else:
+            students = Etudiant.objects.filter(classe_id=classe_id)
 
-        data = []
-
+        # =========================
+        # QUARTERLY REPORTS
+        # =========================
         quarterly_reports = QuarterlyReport.objects.filter(
-            student__classe_id=classe_id,
             quarter=quarter,
             year=year
         )
 
+        if student_id:
+            quarterly_reports = quarterly_reports.filter(student_id=student_id)
+        else:
+            quarterly_reports = quarterly_reports.filter(
+                student__classe_id=classe_id
+            )
+
         quarter_map = {q.student_id: q for q in quarterly_reports}
+
+        # =========================
+        # DATA
+        # =========================
+        data = []
 
         for student in students:
 
+            # =========================
+            # MONTHLY REPORTS (PER STUDENT)
+            # =========================
             monthly_reports = MonthlyReport.objects.filter(
                 student=student,
                 month__in=months,
@@ -1770,16 +1811,9 @@ class QuarterlyReportViewSet(viewsets.ModelViewSet):
 
             report_map = {r.month: r for r in monthly_reports}
 
-            quarterly_reports = QuarterlyReport.objects.filter(
-                student__classe_id=classe_id,
-                quarter=quarter,
-                year=year
-            )
-
-            q_report = quarter_map.get(student.id)
-
-            print(q_report)
-            # --- Month values ---
+            # =========================
+            # MONTH LOOP
+            # =========================
             month_values = []
 
             for m in months:
@@ -1789,7 +1823,6 @@ class QuarterlyReportViewSet(viewsets.ModelViewSet):
                 thmn = int(r.thmn or 0) if r else 0
 
                 income = (ahzab * 8) + thmn
-
                 absence = int(r.absence or 0) if r else 0
 
                 month_values.append({
@@ -1797,12 +1830,20 @@ class QuarterlyReportViewSet(viewsets.ModelViewSet):
                     "absence": absence
                 })
 
-            # fill missing months (important)
+            # ensure 3 months
             while len(month_values) < 3:
-                month_values.append({"income": 0, "absence": 0})
+                month_values.append({
+                    "income": 0,
+                    "absence": 0
+                })
 
+            # =========================
+            # TOTALS
+            # =========================
             total_income = sum(m["income"] for m in month_values)
             total_absence = sum(m["absence"] for m in month_values)
+
+            q_report = quarter_map.get(student.id)
 
             data.append({
                 "student": student.id,
@@ -1823,8 +1864,13 @@ class QuarterlyReportViewSet(viewsets.ModelViewSet):
                 "total_ahzab": q_report.total_ahzab if q_report else 0,
                 "extra": (q_report.extra or "") if q_report else "",
                 "remarks": (q_report.remarks or "") if q_report else ""
-
             })
+
+        # =========================
+        # RETURN
+        # =========================
+        if student_id:
+            return Response(data[0] if data else {})
 
         return Response(data)
 
