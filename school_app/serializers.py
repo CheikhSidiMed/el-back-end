@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Branche, Classe, Niveau, Agent, Etudiant, Mois, Exam, Paiement, Inscription, Garant, GarantPaiement, SalaryPayment, Employee, Job, BankAccount, Receipt, ReceiptPayment, Utilisateur, Activity, AcademicYear, MonthlyReport, DailyAbsence, AccountCategory, Account, Transaction, Permission, Suspension, AbsenceActivity, AbsElmhdara, Competition, Tasfiya, Juge, Participant, Evaluation, CompetitionLevel, PaiementTransations, EtudiantCertified, QuarterlyReport
+from .models import Branche, Classe, Niveau, Agent, Etudiant, Mois, Exam, Paiement, Inscription, Garant, Attestation, GarantPaiement, SalaryPayment, Employee, Job, BankAccount, Receipt, ReceiptPayment, Utilisateur, Activity, AcademicYear, MonthlyReport, DailyAbsence, AccountCategory, Account, Transaction, Permission, Suspension, AbsenceActivity, AbsElmhdara, Competition, Tasfiya, Juge, Participant, Evaluation, CompetitionLevel, PaiementTransations, EtudiantCertified, QuarterlyReport
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
 
@@ -658,4 +658,7 @@ class EtudiantCertifiedSerializer(serializers.ModelSerializer):
         model = EtudiantCertified
         fields = '__all__'
 
-
+class AttestationSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Attestation
+        fields = '__all__'

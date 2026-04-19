@@ -1,7 +1,7 @@
 from django.shortcuts import render
 from rest_framework import viewsets
 from rest_framework.response import Response
-from .models import Branche, Classe, Niveau, Agent, Receipt, SalaryPayment, ReceiptPayment, PaiementTransations, Exam, AbsElmhdara, Job, Inscription, Garant, GarantPaiement, Employee, Transaction, Etudiant, Mois, Paiement, BankAccount, Receipt, ReceiptPayment, Utilisateur, Activity, AcademicYear, MonthlyReport, DailyAbsence, AccountCategory, Account, Permission, Suspension, AbsenceActivity, Competition, Tasfiya, Juge, Participant, Evaluation, CompetitionLevel, EtudiantCertified, QuarterlyReport
+from .models import Branche, Classe, Niveau, Agent, Receipt, SalaryPayment, ReceiptPayment, PaiementTransations, Exam, AbsElmhdara, Job, Inscription, Garant, GarantPaiement, Employee, Transaction, Etudiant, Mois, Paiement, BankAccount, Receipt, ReceiptPayment, Utilisateur, Activity, AcademicYear, MonthlyReport, DailyAbsence, AccountCategory, Account, Permission, Suspension, AbsenceActivity, Competition, Tasfiya, Juge, Participant, Evaluation, CompetitionLevel, EtudiantCertified, QuarterlyReport, Attestation
 from .serializers import *
 from rest_framework_simplejwt.views import TokenObtainPairView
 from django.db import transaction
@@ -107,8 +107,8 @@ def convert_months_to_ar_m(months):
     return "، ".join(MONTHS_AR.get(m, "") for m in months_list)
 
 def format_progress(progress_thmn):
-    if progress_thmn is None:
-        return ""
+    if not progress_thmn:
+        return "0"
 
     ahzab = progress_thmn // 8
     thmn = progress_thmn % 8
@@ -121,7 +121,7 @@ def format_progress(progress_thmn):
     if thmn:
         parts.append(f"{thmn} ثمن")
 
-    return " و ".join(parts) if parts else "0"
+    return " و ".join(parts)
 
 def get_previous_academic_year(year_str):
     try:
@@ -142,7 +142,14 @@ def get_previous_month_and_year(month, year):
 def calculate_progress(current, previous):
     current_total = (int(current.ahzab or 0) * 8) + int(current.thmn or 0)
     prev_total = (int(previous.ahzab or 0) * 8) + int(previous.thmn or 0) if previous else 0
-    return format_progress(current_total - prev_total)
+
+    progress = current_total - prev_total
+
+    # CAP: max 60 hizb = 480 thumn
+    max_progress = 60 * 8
+    progress = min(max(progress, 0), max_progress)
+
+    return format_progress(progress)
 
 class BrancheViewSet(viewsets.ModelViewSet):
     serializer_class = BrancheSerializer
@@ -2330,7 +2337,9 @@ class EvaluationViewSet(viewsets.ModelViewSet):
 
         return queryset
 
-
+class AttestationViewSet(viewsets.ModelViewSet):
+    queryset = Attestation.objects.all()
+    serializer_class = AttestationSerializer
 
 @api_view(['GET'])
 def daily_absence_list(request):
