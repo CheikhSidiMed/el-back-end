@@ -2633,12 +2633,119 @@ def assign_participants(request):
     })
 
 
+# @api_view(['GET'])
+# def unpaid_months_until_suspend(request):
+#     student_id = request.GET.get('student_id')
+#     suspend_date = request.GET.get('suspend_date')
+#     full_month_fee = request.GET.get('month_fee')
+
+#     try:
+#         suspend_date = date.fromisoformat(suspend_date)
+#         full_month_fee = Decimal(full_month_fee)
+#     except:
+#         return Response({"error": "Invalid suspend_date or month_fee"}, status=400)
+
+#     try:
+#         student = Etudiant.objects.get(id=student_id)
+#     except:
+#         return Response({"error": "Student not found"}, status=404)
+
+#     if suspend_date <= student.date_inscription:
+#         return Response({"error": "Suspend before inscription"}, status=400)
+
+#     ARABIC_MONTHS = [
+#         'يناير','فبراير','مارس','أبريل','مايو','يونيو',
+#         'يوليو','أغسطس','سبتمبر','أكتوبر','نوفمبر','ديسمبر'
+#     ]
+
+#     unpaid = []
+
+#     academic_years = AcademicYear.objects.filter(
+#         start_date__lte=suspend_date,
+#         end_date__gte=student.date_inscription
+#     ).order_by('start_date')
+
+#     for academic_year in academic_years:
+
+#         payments = Paiement.objects.filter(
+#             etudiant=student,
+#             academic_year=academic_year
+#         ).values('month', 'paid_amount')
+
+#         payments_dict = {
+#             p['month']: Decimal(p['paid_amount']) for p in payments
+#         }
+
+#         year_start = academic_year.start_date
+#         year_end = academic_year.end_date
+
+#         current_date = max(student.date_inscription, year_start)
+#         last_date = min(suspend_date, year_end)
+
+#         # نبدأ من أول شهر فعلي
+#         cursor = date(current_date.year, current_date.month, 1)
+
+#         while cursor <= last_date.replace(day=1):
+
+#             month = cursor.month
+#             year = cursor.year
+#             days_in_month = monthrange(year, month)[1]
+
+#             # -----------------------
+#             # حساب المبلغ المستحق
+#             # -----------------------
+
+#             # شهر التسجيل
+#             if cursor.year == student.date_inscription.year and cursor.month == student.date_inscription.month:
+#                 days_present = days_in_month - student.date_inscription.day + 1
+#                 proportion = Decimal(days_present) / Decimal(days_in_month)
+#                 due_amount = (full_month_fee * proportion).quantize(Decimal("0.01"))
+
+#             # شهر الإيقاف
+#             elif cursor.year == suspend_date.year and cursor.month == suspend_date.month:
+#                 days_present = suspend_date.day - 1
+#                 proportion = Decimal(days_present) / Decimal(days_in_month)
+#                 due_amount = (full_month_fee * proportion).quantize(Decimal("0.01"))
+
+#             # شهر عادي
+#             else:
+#                 due_amount = full_month_fee
+
+#             paid_amount = payments_dict.get(month, Decimal("0.00"))
+#             remaining = due_amount - paid_amount
+
+#             if remaining > 0:
+#                 unpaid.append({
+#                     "academic_year": academic_year.year,
+#                     "month": month,
+#                     "month_name_ar": ARABIC_MONTHS[month - 1],
+#                     "due_amount": float(due_amount),
+#                     "paid_amount": float(paid_amount),
+#                     "remaining_amount": float(remaining)
+#                 })
+
+#             # الشهر التالي
+#             if month == 12:
+#                 cursor = date(year + 1, 1, 1)
+#             else:
+#                 cursor = date(year, month + 1, 1)
+
+#     return Response({
+#         "student_id": student.id,
+#         "suspend_date": suspend_date,
+#         "total_unpaid": float(sum(u["remaining_amount"] for u in unpaid)),
+#         "unpaid_months": unpaid
+#     })
+
 @api_view(['GET'])
 def unpaid_months_until_suspend(request):
     student_id = request.GET.get('student_id')
     suspend_date = request.GET.get('suspend_date')
     full_month_fee = request.GET.get('month_fee')
 
+    # -----------------------
+    # Validate input
+    # -----------------------
     try:
         suspend_date = date.fromisoformat(suspend_date)
         full_month_fee = Decimal(full_month_fee)
@@ -2660,6 +2767,9 @@ def unpaid_months_until_suspend(request):
 
     unpaid = []
 
+    # -----------------------
+    # Get relevant academic years
+    # -----------------------
     academic_years = AcademicYear.objects.filter(
         start_date__lte=suspend_date,
         end_date__gte=student.date_inscription
@@ -2667,22 +2777,25 @@ def unpaid_months_until_suspend(request):
 
     for academic_year in academic_years:
 
+        # -----------------------
+        # Payments (IMPORTANT FIX)
+        # -----------------------
         payments = Paiement.objects.filter(
             etudiant=student,
             academic_year=academic_year
         ).values('month', 'paid_amount')
 
         payments_dict = {
-            p['month']: Decimal(p['paid_amount']) for p in payments
+            (academic_year.id, p['month']): Decimal(p['paid_amount'])
+            for p in payments
         }
 
-        year_start = academic_year.start_date
-        year_end = academic_year.end_date
+        # -----------------------
+        # Define period
+        # -----------------------
+        current_date = max(student.date_inscription, academic_year.start_date)
+        last_date = min(suspend_date, academic_year.end_date)
 
-        current_date = max(student.date_inscription, year_start)
-        last_date = min(suspend_date, year_end)
-
-        # نبدأ من أول شهر فعلي
         cursor = date(current_date.year, current_date.month, 1)
 
         while cursor <= last_date.replace(day=1):
@@ -2692,31 +2805,43 @@ def unpaid_months_until_suspend(request):
             days_in_month = monthrange(year, month)[1]
 
             # -----------------------
-            # حساب المبلغ المستحق
+            # Calculate due amount
             # -----------------------
 
-            # شهر التسجيل
-            if cursor.year == student.date_inscription.year and cursor.month == student.date_inscription.month:
+            # First month (registration)
+            if year == student.date_inscription.year and month == student.date_inscription.month:
                 days_present = days_in_month - student.date_inscription.day + 1
                 proportion = Decimal(days_present) / Decimal(days_in_month)
                 due_amount = (full_month_fee * proportion).quantize(Decimal("0.01"))
 
-            # شهر الإيقاف
-            elif cursor.year == suspend_date.year and cursor.month == suspend_date.month:
-                days_present = suspend_date.day - 1
-                proportion = Decimal(days_present) / Decimal(days_in_month)
-                due_amount = (full_month_fee * proportion).quantize(Decimal("0.01"))
+            # Last month (suspension)
+            elif year == suspend_date.year and month == suspend_date.month:
+                # 🔥 choose ONE behavior:
 
-            # شهر عادي
+                # OPTION A (recommended): FULL month
+                due_amount = full_month_fee
+
+                # OPTION B (if you want partial):
+                # days_present = suspend_date.day - 1
+                # proportion = Decimal(days_present) / Decimal(days_in_month)
+                # due_amount = (full_month_fee * proportion).quantize(Decimal("0.01"))
+
+            # Normal months
             else:
                 due_amount = full_month_fee
 
-            paid_amount = payments_dict.get(month, Decimal("0.00"))
+            # -----------------------
+            # Paid / Remaining
+            # -----------------------
+            paid_amount = payments_dict.get((academic_year.id, month), Decimal("0.00"))
             remaining = due_amount - paid_amount
 
+            # -----------------------
+            # Skip fully paid months ✅
+            # -----------------------
             if remaining > 0:
                 unpaid.append({
-                    "academic_year": academic_year.year,
+                    "academic_year": academic_year.name,
                     "month": month,
                     "month_name_ar": ARABIC_MONTHS[month - 1],
                     "due_amount": float(due_amount),
@@ -2724,16 +2849,23 @@ def unpaid_months_until_suspend(request):
                     "remaining_amount": float(remaining)
                 })
 
-            # الشهر التالي
+            # -----------------------
+            # Next month
+            # -----------------------
             if month == 12:
                 cursor = date(year + 1, 1, 1)
             else:
                 cursor = date(year, month + 1, 1)
 
+    # -----------------------
+    # Final response
+    # -----------------------
+    total_unpaid = sum(u["remaining_amount"] for u in unpaid)
+
     return Response({
         "student_id": student.id,
         "suspend_date": suspend_date,
-        "total_unpaid": float(sum(u["remaining_amount"] for u in unpaid)),
+        "total_unpaid": float(total_unpaid),
         "unpaid_months": unpaid
     })
 
