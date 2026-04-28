@@ -140,16 +140,46 @@ def get_previous_month_and_year(month, year):
     return MONTHS_AR[month_num - 1], year
 
 def calculate_progress(current, previous):
-    current_total = (int(current.ahzab or 0) * 8) + int(current.thmn or 0)
-    prev_total = (int(previous.ahzab or 0) * 8) + int(previous.thmn or 0) if previous else 0
+    current_ahzab = int(current.ahzab or 0)
+    current_thmn = int(current.thmn or 0)
+
+    # ✅ STOP condition: already reached 60 hizb
+    if current_ahzab >= 60:
+        return current.progress  # 👈 use stored DB value
+
+    current_total = (current_ahzab * 8) + current_thmn
+    prev_total = (
+        (int(previous.ahzab or 0) * 8) + int(previous.thmn or 0)
+        if previous else 0
+    )
 
     progress = current_total - prev_total
 
-    # CAP: max 60 hizb = 480 thumn
+    # CAP
     max_progress = 60 * 8
     progress = min(max(progress, 0), max_progress)
 
     return format_progress(progress)
+
+def parse_progress(progress_str):
+    if not progress_str:
+        return 0
+
+    try:
+        # extract number
+        value = int(progress_str.split()[0])
+        return value
+    except:
+        return 0
+
+def get_cumulative_income(report, last_income):
+    ahzab = int(report.ahzab or 0)
+    thmn = int(report.thmn or 0)
+
+    if ahzab >= 60:
+        return parse_progress(report.progress) if report.progress else last_income
+
+    return (ahzab * 8) + thmn
 
 class BrancheViewSet(viewsets.ModelViewSet):
     serializer_class = BrancheSerializer
@@ -1615,16 +1645,8 @@ class MonthlyReportViewSet(viewsets.ModelViewSet):
 
             # -------- PROGRESS --------
             try:
-                current_total = (int(report.ahzab or 0) * 8) + int(report.thmn or 0)
 
-                prev_total = 0
-                if prev_report:
-                    prev_total = (int(prev_report.ahzab or 0) * 8) + int(prev_report.thmn or 0)
-
-                final_total = current_total if current_total != 0 else prev_total
-                progress = final_total - prev_total
-
-                item['progress'] = format_progress(progress)
+                item['progress'] = calculate_progress(report, prev_report)
 
             except Exception as e:
                 print("Progress error:", str(e))
@@ -1822,6 +1844,7 @@ class QuarterlyReportViewSet(viewsets.ModelViewSet):
             # MONTH LOOP
             # =========================
             month_values = []
+            prev_report = None 
 
             for m in months:
                 r = report_map.get(m)
@@ -1836,6 +1859,36 @@ class QuarterlyReportViewSet(viewsets.ModelViewSet):
                     "income": income,
                     "absence": absence
                 })
+            
+            # last_income = 0
+
+            # for m in months:
+            #     r = report_map.get(m)
+
+            #     if r:
+            #         ahzab = int(r.ahzab or 0)
+            #         thmn = int(r.thmn or 0)
+
+            #         # ✅ ALWAYS compute cumulative
+            #         income = (ahzab * 8) + thmn
+
+            #         # ✅ OPTIONAL: cap at 60 hizb
+            #         max_total = 60 * 8
+            #         income = min(income, max_total)
+
+            #         absence = int(r.absence or 0)
+
+            #         last_income = income
+
+            #     else:
+            #         income = last_income
+            #         absence = 0
+
+                month_values.append({
+                    "income": income,
+                    "absence": absence
+                })
+
 
             # ensure 3 months
             while len(month_values) < 3:
