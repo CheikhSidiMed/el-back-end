@@ -80,6 +80,12 @@ QUARTER_MONTHS = {
     'Q4': ['يوليو', 'أغسطس', 'سبتمبر'],
 }
 
+def safe_float(value):
+    try:
+        return float(str(value).replace(',', '.'))
+    except:
+        return 0.0
+
 def calc_score(e):
     return round(
         e.personality +
@@ -107,21 +113,34 @@ def convert_months_to_ar_m(months):
     return "، ".join(MONTHS_AR.get(m, "") for m in months_list)
 
 def format_progress(progress_thmn):
-    if not progress_thmn:
+    if progress_thmn is None:
         return "0"
 
-    ahzab = progress_thmn // 8
+    progress_thmn = float(str(progress_thmn).replace(',', '.'))
+
+    # 🔥 LIMIT HARD CAP (60 max)
+    max_thmn = 60 * 8  # 60 hizb = 480 thmn
+
+    if progress_thmn > max_thmn:
+        progress_thmn = max_thmn
+
+    ahzab = int(progress_thmn // 8)
     thmn = progress_thmn % 8
 
     parts = []
 
     if ahzab:
-        parts.append(f"{ahzab} حزب")
+        if ahzab == 1:
+            parts.append("حزب")
+        else:
+            parts.append(f"{ahzab} حزب")
 
-    if thmn:
-        parts.append(f"{thmn} ثمن")
+    if thmn != 0:
+        thmn_str = f"{thmn:.10g}"
+        parts.append(f"{thmn_str} ثمن")
 
-    return " و ".join(parts)
+    return " و ".join(parts) if parts else "0"
+    
 
 def get_previous_academic_year(year_str):
     try:
@@ -140,16 +159,16 @@ def get_previous_month_and_year(month, year):
     return MONTHS_AR[month_num - 1], year
 
 def calculate_progress(current, previous):
-    current_ahzab = int(current.ahzab or 0)
-    current_thmn = int(current.thmn or 0)
+    current_ahzab = float(current.ahzab or 0)
+    current_thmn = float(current.thmn or 0)
 
-    # ✅ STOP condition: already reached 60 hizb
-    if current_ahzab >= 60:
-        return current.progress  # 👈 use stored DB value
+    # STOP condition: already reached 60 hizb
+    if current_ahzab >= 60 or current_ahzab == 0 or current_thmn == 0 :
+        return current.progress
 
     current_total = (current_ahzab * 8) + current_thmn
     prev_total = (
-        (int(previous.ahzab or 0) * 8) + int(previous.thmn or 0)
+        (float(previous.ahzab or 0) * 8) + float(previous.thmn or 0)
         if previous else 0
     )
 
@@ -1702,7 +1721,6 @@ class MonthlyReportViewSet(viewsets.ModelViewSet):
         # prev_month_num = 12 if month_num == 1 else month_num - 1
         # prev_month = MONTHS_AR[prev_month_num]
         prev_month, prev_year = get_previous_month_and_year(month, year)
-        print(classe_id, 'classe_id')
         prev_reports = MonthlyReport.objects.filter(
             student__classe_id=classe_id,
             month=prev_month,
@@ -1738,11 +1756,11 @@ class MonthlyReportViewSet(viewsets.ModelViewSet):
             # progress
             try:
                 # current_total = int(report.ahzab or 0) + int(report.thmn or 0)
-                current_total = (int(report.ahzab or 0) * 8) + int(report.thmn or 0)
+                current_total = (safe_float(report.ahzab or 0) * 8) + safe_float(report.thmn or 0)
                 prev_total = 0
 
                 if prev_report:
-                    prev_total = int(prev_report.ahzab or 0) + int(prev_report.thmn or 0)
+                    prev_total = safe_float(prev_report.ahzab or 0) + safe_float(prev_report.thmn or 0)
 
                 progress = current_total - prev_total
                 serialized['progress'] = format_progress(progress)
@@ -1779,6 +1797,153 @@ class QuarterlyReportViewSet(viewsets.ModelViewSet):
             )
         return queryset
 
+    # @action(detail=False, methods=['get'], url_path='bulk-get')
+    # def bulk_get(self, request):
+    #     classe_id = request.query_params.get('classe')
+    #     quarter = request.query_params.get('quarter')
+    #     year = request.query_params.get('year')
+    #     student_id = request.query_params.get('student')
+
+    #     # =========================
+    #     # VALIDATION
+    #     # =========================
+    #     if not student_id and not classe_id:
+    #         return Response(
+    #             {"error": "classe or student is required"},
+    #             status=400
+    #         )
+
+    #     months = QUARTER_MONTHS.get(quarter, [])
+
+    #     # =========================
+    #     # STUDENTS
+    #     # =========================
+    #     if student_id:
+    #         students = Etudiant.objects.filter(id=student_id)
+    #     else:
+    #         students = Etudiant.objects.filter(classe_id=classe_id)
+
+    #     # =========================
+    #     # QUARTERLY REPORTS
+    #     # =========================
+    #     quarterly_reports = QuarterlyReport.objects.filter(
+    #         quarter=quarter,
+    #         year=year
+    #     )
+
+    #     if student_id:
+    #         quarterly_reports = quarterly_reports.filter(student_id=student_id)
+    #     else:
+    #         quarterly_reports = quarterly_reports.filter(
+    #             student__classe_id=classe_id
+    #         )
+
+    #     quarter_map = {q.student_id: q for q in quarterly_reports}
+
+    #     # =========================
+    #     # DATA
+    #     # =========================
+    #     data = []
+
+    #     for student in students:
+
+    #         # =========================
+    #         # MONTHLY REPORTS (PER STUDENT)
+    #         # =========================
+    #         monthly_reports = MonthlyReport.objects.filter(
+    #             student=student,
+    #             month__in=months,
+    #             year=year
+    #         )
+
+    #         report_map = {r.month: r for r in monthly_reports}
+
+    #         # =========================
+    #         # MONTH LOOP
+    #         # =========================
+    #         month_values = []
+    #         prev_report = None 
+
+    #         # for m in months:
+    #         #     r = report_map.get(m)
+
+    #         #     ahzab = int(r.ahzab or 0) if r else 0
+    #         #     thmn = int(r.thmn or 0) if r else 0
+
+    #         #     income = (ahzab * 8) + thmn
+    #         #     absence = int(r.absence or 0) if r else 0
+
+    #         #     month_values.append({
+    #         #         "income": income,
+    #         #         "absence": absence
+    #         #     })
+    #         for m in months:
+    #             r = report_map.get(m)
+
+    #             ahzab = float(r.ahzab or 0) if r else 0
+    #             thmn = float(r.thmn or 0) if r else 0
+
+    #             income = (ahzab * 8) + thmn
+    #             absence = int(r.absence or 0) if r else 0
+
+    #             month_values.append({
+    #                 "income": income,
+    #                 "absence": absence
+    #             })
+
+
+    #         # ensure 3 months
+    #         while len(month_values) < 3:
+    #             month_values.append({
+    #                 "income": 0,
+    #                 "absence": 0
+    #             })
+
+    #         # =========================
+    #         # TOTALS
+    #         # =========================
+    #         # total_income = sum(m["income"] for m in month_values)
+    #         if month_values:
+    #             first_income = month_values[0]["income"]
+    #             last_income = month_values[-1]["income"]
+    #             total_income = last_income - first_income
+    #             print('first_income : ', first_income, ' - last_income ', last_income, '  -  total_income, ', total_income)
+    #         else:
+    #             total_income = 0
+
+    #         total_absence = sum(m["absence"] for m in month_values)
+
+    #         q_report = quarter_map.get(student.id)
+
+    #         data.append({
+    #             "student": student.id,
+    #             "student_name": student.full_name,
+
+    #             "month_1_income": format_progress(month_values[0]["income"]),
+    #             "month_1_absence": month_values[0]["absence"],
+
+    #             "month_2_income": format_progress(month_values[1]["income"]),
+    #             "month_2_absence": month_values[1]["absence"],
+
+    #             "month_3_income": format_progress(month_values[2]["income"]),
+    #             "month_3_absence": month_values[2]["absence"],
+
+    #             "total_income": format_progress(total_income),
+    #             "total_absence": total_absence,
+
+    #             "total_ahzab": q_report.total_ahzab if q_report else 0,
+    #             "extra": (q_report.extra or "") if q_report else "",
+    #             "remarks": (q_report.remarks or "") if q_report else ""
+    #         })
+
+    #     # =========================
+    #     # RETURN
+    #     # =========================
+    #     if student_id:
+    #         return Response(data[0] if data else {})
+
+    #     return Response(data)
+
     @action(detail=False, methods=['get'], url_path='bulk-get')
     def bulk_get(self, request):
         classe_id = request.query_params.get('classe')
@@ -1786,14 +1951,8 @@ class QuarterlyReportViewSet(viewsets.ModelViewSet):
         year = request.query_params.get('year')
         student_id = request.query_params.get('student')
 
-        # =========================
-        # VALIDATION
-        # =========================
         if not student_id and not classe_id:
-            return Response(
-                {"error": "classe or student is required"},
-                status=400
-            )
+            return Response({"error": "classe or student is required"}, status=400)
 
         months = QUARTER_MONTHS.get(quarter, [])
 
@@ -1816,22 +1975,17 @@ class QuarterlyReportViewSet(viewsets.ModelViewSet):
         if student_id:
             quarterly_reports = quarterly_reports.filter(student_id=student_id)
         else:
-            quarterly_reports = quarterly_reports.filter(
-                student__classe_id=classe_id
-            )
+            quarterly_reports = quarterly_reports.filter(student__classe_id=classe_id)
 
         quarter_map = {q.student_id: q for q in quarterly_reports}
 
-        # =========================
-        # DATA
-        # =========================
         data = []
 
+        # =========================
+        # LOOP STUDENTS
+        # =========================
         for student in students:
 
-            # =========================
-            # MONTHLY REPORTS (PER STUDENT)
-            # =========================
             monthly_reports = MonthlyReport.objects.filter(
                 student=student,
                 month__in=months,
@@ -1840,99 +1994,155 @@ class QuarterlyReportViewSet(viewsets.ModelViewSet):
 
             report_map = {r.month: r for r in monthly_reports}
 
-            # =========================
-            # MONTH LOOP
-            # =========================
             month_values = []
-            prev_report = None 
 
+            # =========================
+            # MONTH LOOP (CLEAN)
+            # =========================
             for m in months:
                 r = report_map.get(m)
 
-                ahzab = int(r.ahzab or 0) if r else 0
-                thmn = int(r.thmn or 0) if r else 0
-
-                income = (ahzab * 8) + thmn
+                ahzab = float(r.ahzab or 0) if r else 0
+                thmn = float(r.thmn or 0) if r else 0
                 absence = int(r.absence or 0) if r else 0
 
                 month_values.append({
-                    "income": income,
+                    "ahzab": ahzab,
+                    "thmn": thmn,
                     "absence": absence
                 })
-            
-            # last_income = 0
-
-            # for m in months:
-            #     r = report_map.get(m)
-
-            #     if r:
-            #         ahzab = int(r.ahzab or 0)
-            #         thmn = int(r.thmn or 0)
-
-            #         # ✅ ALWAYS compute cumulative
-            #         income = (ahzab * 8) + thmn
-
-            #         # ✅ OPTIONAL: cap at 60 hizb
-            #         max_total = 60 * 8
-            #         income = min(income, max_total)
-
-            #         absence = int(r.absence or 0)
-
-            #         last_income = income
-
-            #     else:
-            #         income = last_income
-            #         absence = 0
-
-                month_values.append({
-                    "income": income,
-                    "absence": absence
-                })
-
 
             # ensure 3 months
             while len(month_values) < 3:
                 month_values.append({
-                    "income": 0,
+                    "ahzab": 0,
+                    "thmn": 0,
                     "absence": 0
                 })
 
             # =========================
-            # TOTALS
+            # FORMAT FUNCTION
             # =========================
-            total_income = sum(m["income"] for m in month_values)
-            total_absence = sum(m["absence"] for m in month_values)
+            def format_progress(ahzab, thmn):
+                ahzab = float(ahzab or 0)
+                thmn = float(thmn or 0)
 
+                max_thmn = 60 * 8  # 480 thmn
+
+                total = (ahzab * 8) + thmn
+                if total > max_thmn:
+                    total = max_thmn
+
+                # re-convert after limit
+                ahzab = int(total // 8)
+                thmn = total % 8
+
+                parts = []
+
+                if ahzab:
+                    parts.append("حزب" if ahzab == 1 else f"{ahzab} حزب")
+
+                if thmn:
+                    thmn_str = f"{thmn:.10g}"
+                    parts.append(f"{thmn_str} ثمن")
+
+                return " و ".join(parts) if parts else "0"
+
+            # =========================
+            # TOTAL (M3 - M1)
+            # =========================
+            first = month_values[0]
+            last = month_values[2]
+
+            total_ahzab = last["ahzab"] - first["ahzab"]
+            total_thmn = last["thmn"] - first["thmn"]
+
+            # =========================
+            # QUARTER REPORT
+            # =========================
             q_report = quarter_map.get(student.id)
 
             data.append({
                 "student": student.id,
                 "student_name": student.full_name,
 
-                "month_1_income": format_progress(month_values[0]["income"]),
+                # MONTHS
+                "month_1_income": format_progress(month_values[0]["ahzab"], month_values[0]["thmn"]),
                 "month_1_absence": month_values[0]["absence"],
 
-                "month_2_income": format_progress(month_values[1]["income"]),
+                "month_2_income": format_progress(month_values[1]["ahzab"], month_values[1]["thmn"]),
                 "month_2_absence": month_values[1]["absence"],
 
-                "month_3_income": format_progress(month_values[2]["income"]),
+                "month_3_income": format_progress(month_values[2]["ahzab"], month_values[2]["thmn"]),
                 "month_3_absence": month_values[2]["absence"],
 
-                "total_income": format_progress(total_income),
-                "total_absence": total_absence,
+                # TOTAL
+                "total_income": format_progress(total_ahzab, total_thmn),
+                "total_absence": sum(m["absence"] for m in month_values),
 
-                "total_ahzab": q_report.total_ahzab if q_report else 0,
-                "extra": (q_report.extra or "") if q_report else "",
-                "remarks": (q_report.remarks or "") if q_report else ""
+                # QUARTER DATA
+                "total_ahzab": format_progress(last["ahzab"], last["thmn"]),
+                "extra": q_report.extra or "" if q_report else "",
+                "remarks": q_report.remarks or "" if q_report else ""
             })
 
         # =========================
-        # RETURN
+        # RESPONSE
         # =========================
         if student_id:
             return Response(data[0] if data else {})
 
         return Response(data)
+
+    # @action(detail=False, methods=['post'], url_path='bulk-save')
+    # def bulk_save(self, request):
+    #     reports = request.data
+
+    #     created = 0
+    #     updated = 0
+    #     saved_reports = []
+
+    #     with transaction.atomic():
+    #         for data in reports:
+
+    #             obj, is_created = QuarterlyReport.objects.update_or_create(
+    #                 student_id=data['student'],
+    #                 quarter=data['quarter'],
+    #                 year=data['year'],
+    #                 defaults={
+
+    #                     # -------- MONTH 1 --------
+    #                     # "month_1_income": int(data.get("month_1_income", 0)),
+    #                     # "month_1_absence": int(data.get("month_1_absence", 0)),
+
+    #                     # -------- MONTH 2 --------
+    #                     # "month_2_income": int(data.get("month_2_income", 0)),
+    #                     # "month_2_absence": int(data.get("month_2_absence", 0)),
+
+    #                     # -------- MONTH 3 --------
+    #                     # "month_3_income": int(data.get("month_3_income", 0)),
+    #                     # "month_3_absence": int(data.get("month_3_absence", 0)),
+
+    #                     # -------- EXTRA --------
+    #                     "total_ahzab": int(data.get("total_ahzab", 0)),
+    #                     "extra": data.get("extra", ""),
+    #                     "remarks": data.get("remarks", "")
+    #                 }
+    #             )
+
+    #             created += int(is_created)
+    #             updated += int(not is_created)
+
+    #             saved_reports.append(obj)
+
+    #     # 🔥 serialize result
+    #     serializer = QuarterlyReportSerializer(saved_reports, many=True)
+
+    #     return Response({
+    #         "created": created,
+    #         "updated": updated,
+    #         "data": serializer.data
+    #     }, status=status.HTTP_200_OK)
 
     @action(detail=False, methods=['post'], url_path='bulk-save')
     def bulk_save(self, request):
@@ -1942,40 +2152,33 @@ class QuarterlyReportViewSet(viewsets.ModelViewSet):
         updated = 0
         saved_reports = []
 
+        def safe_int(value):
+            try:
+                return int(float(str(value).replace(',', '.')))
+            except:
+                return 0
+
         with transaction.atomic():
             for data in reports:
+                try:
+                    obj, is_created = QuarterlyReport.objects.update_or_create(
+                        student_id=data['student'],
+                        quarter=data['quarter'],
+                        year=data['year'],
+                        defaults={
+                            "total_ahzab": safe_int(data.get("total_ahzab", 0)),
+                            "extra": data.get("extra", ""),
+                            "remarks": data.get("remarks", "")
+                        }
+                    )
 
-                obj, is_created = QuarterlyReport.objects.update_or_create(
-                    student_id=data['student'],
-                    quarter=data['quarter'],
-                    year=data['year'],
-                    defaults={
+                    created += int(is_created)
+                    updated += int(not is_created)
+                    saved_reports.append(obj)
 
-                        # -------- MONTH 1 --------
-                        # "month_1_income": int(data.get("month_1_income", 0)),
-                        # "month_1_absence": int(data.get("month_1_absence", 0)),
+                except Exception as e:
+                    print("Bulk save error:", e)
 
-                        # -------- MONTH 2 --------
-                        # "month_2_income": int(data.get("month_2_income", 0)),
-                        # "month_2_absence": int(data.get("month_2_absence", 0)),
-
-                        # -------- MONTH 3 --------
-                        # "month_3_income": int(data.get("month_3_income", 0)),
-                        # "month_3_absence": int(data.get("month_3_absence", 0)),
-
-                        # -------- EXTRA --------
-                        "total_ahzab": int(data.get("total_ahzab", 0)),
-                        "extra": data.get("extra", ""),
-                        "remarks": data.get("remarks", "")
-                    }
-                )
-
-                created += int(is_created)
-                updated += int(not is_created)
-
-                saved_reports.append(obj)
-
-        # 🔥 serialize result
         serializer = QuarterlyReportSerializer(saved_reports, many=True)
 
         return Response({
