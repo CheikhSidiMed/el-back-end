@@ -159,6 +159,7 @@ class Etudiant(models.Model):
     gender = models.CharField(max_length=1, choices=[('M', 'ذكر'), ('F', 'أنثى')])
     birth_date = models.DateField(null=True, blank=True)
     birth_place = models.CharField(max_length=100, null=True, blank=True)
+    nni = models.CharField(max_length=100, null=True, blank=True)
     date_inscription = models.DateField(default=date.today)
     date_count = models.DateField(auto_now_add=True)
     student_photo = models.ImageField(upload_to='etudiants_photos/', null=True, blank=True)
