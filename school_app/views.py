@@ -163,7 +163,7 @@ def calculate_progress(current, previous):
     current_thmn = float(current.thmn or 0)
 
     # STOP condition: already reached 60 hizb
-    if current_ahzab >= 60 or current_ahzab == 0 or current_thmn == 0 :
+    if current_ahzab >= 60 or (current_ahzab <= 0 and current_thmn <= 0):
         return current.progress
 
     current_total = (current_ahzab * 8) + current_thmn
