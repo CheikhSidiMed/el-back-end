@@ -389,6 +389,30 @@ class DailyAbsence(models.Model):
     def __str__(self):
         return f"{self.student.full_name} - {self.date} ({self.get_session_display()})"
 
+class EvaluationResult(models.Model):
+    student = models.ForeignKey(Etudiant, on_delete=models.CASCADE)
+    year = models.CharField(max_length=20)
+    month = models.CharField(max_length=20)
+
+    evaluation = models.CharField(max_length=100, blank=True, null=True)
+    elhasila = models.CharField(max_length=100, blank=True, null=True)
+    progress = models.CharField(max_length=100, blank=True, null=True)
+    result = models.CharField(max_length=100, blank=True, null=True)
+    evaluation_final = models.CharField(max_length=100, blank=True, null=True)
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name='evaluationresult'
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ['student', 'month', 'year']
+
+    def __str__(self):
+        return f"{self.student.full_name} - {self.month} {self.year}"
+
 class Employee(models.Model):
     number = models.CharField(max_length=50, unique=True, blank=True, null=True)  # matricule ou code employé
     full_name = models.CharField(max_length=200)
@@ -1139,15 +1163,20 @@ class Attestation(models.Model):
     TYPE_CHOICES = [
         ('certificat', 'إفادة'),
         ('felicitation', 'تهنئة'),
+        ('condolence', 'تعزية'),
     ]
 
     etudiant = models.ForeignKey(
         'Etudiant',
         on_delete=models.CASCADE,
+        blank=True, null=True, 
         related_name='attestations'
     )
 
     type = models.CharField(max_length=20, choices=TYPE_CHOICES)
+    deceased = models.CharField(max_length=255, blank=True, null=True)
+    elmouaza = models.CharField(max_length=255, blank=True, null=True)
+    mention = models.CharField(max_length=255, blank=True, null=True)
 
     date_emission = models.DateField(default=timezone.now)
 
