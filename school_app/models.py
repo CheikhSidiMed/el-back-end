@@ -162,7 +162,7 @@ class Etudiant(models.Model):
     nni = models.CharField(max_length=100, null=True, blank=True)
     date_inscription = models.DateField(default=date.today)
     date_count = models.DateField(auto_now_add=True)
-    student_photo = models.ImageField(upload_to='etudiants_photos/', null=True, blank=True)
+    student_photo = models.ImageField(upload_to=upload_student_photo, null=True, blank=True)
 
     payment_nature = models.CharField(
         max_length=20,

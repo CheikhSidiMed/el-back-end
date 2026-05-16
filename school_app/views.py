@@ -569,8 +569,14 @@ class TransactionViewSet(viewsets.ModelViewSet):
     def bank_statistics(self, request):
 
         account_id = request.GET.get('account_id')
+        date_from  = request.GET.get('date_from')   # YYYY-MM-DD
+        date_to    = request.GET.get('date_to')     # YYYY-MM-DD
 
         qs = Transaction.objects.filter(account_id=account_id)
+        if date_from:
+            qs = qs.filter(date__gte=date_from)
+        if date_to:
+            qs = qs.filter(date__lte=date_to)
 
         stats = (
             qs.values(
@@ -1166,6 +1172,48 @@ class PermissionTreeAPIView(APIView):
 class ReceiptViewSet(viewsets.ModelViewSet):
     queryset = Receipt.objects.all()
     serializer_class = ReceiptSerializer
+
+    def list(self, request, *args, **kwargs):
+        qs = Receipt.objects.select_related(
+            'student', 'student__classe', 'student__branche',
+            'agent', 'created_by', 'academic_year'
+        ).order_by('-receipt_id')
+
+        search = request.query_params.get('search', '').strip()
+        date_from = request.query_params.get('date_from')
+        date_to = request.query_params.get('date_to')
+
+        if search:
+            qs = qs.filter(
+                Q(student__student_name__icontains=search) |
+                Q(agent__agent_name__icontains=search) |
+                Q(receipt_id__icontains=search)
+            )
+        if date_from:
+            qs = qs.filter(receipt_date__gte=date_from)
+        if date_to:
+            qs = qs.filter(receipt_date__lte=date_to)
+
+        data = []
+        for r in qs[:300]:
+            data.append({
+                'receipt_id': r.receipt_id,
+                'receipt_date': r.receipt_date,
+                'total_amount': r.total_amount,
+                'receipt_description': r.receipt_description,
+                'created_by': r.created_by.first_name if r.created_by else '',
+                'student': {
+                    'id': r.student.id,
+                    'student_name': r.student.student_name,
+                    'classe': r.student.classe.nom if r.student.classe else '',
+                    'branche': r.student.branche.nom if r.student.branche else '',
+                } if r.student else None,
+                'agent': {
+                    'id': r.agent.id,
+                    'agent_name': r.agent.agent_name,
+                } if r.agent else None,
+            })
+        return Response(data)
 
 class ReceiptPaymentViewSet(viewsets.ModelViewSet):
     queryset = ReceiptPayment.objects.all()
@@ -1779,6 +1827,21 @@ class MonthlyReportViewSet(viewsets.ModelViewSet):
             "data": result
         }, status=status.HTTP_200_OK)
 
+def get_evaluation_final(result):
+    try:
+        r = float(result)
+    except (TypeError, ValueError):
+        return ''
+    if r >= 18:  return 'ممتاز جدا'
+    if r >= 16:  return 'ممتاز'
+    if r >= 14:  return 'جيد جدا'
+    if r >= 10:  return 'جيد'
+    if r >= 8:   return 'لا بأس'
+    if r >= 6:   return 'ضعيف'
+    if r >= 1:   return 'ضعيف جدا'
+    return ''
+
+
 class EvaluationResultViewSet(viewsets.ModelViewSet):
     queryset = EvaluationResult.objects.all()
     serializer_class = EvaluationResultSerializer
@@ -1796,6 +1859,46 @@ class EvaluationResultViewSet(viewsets.ModelViewSet):
                 year=year
             )
         return queryset
+
+    @action(detail=False, methods=['get'], url_path='ranking')
+    def ranking(self, request):
+        month = request.query_params.get('month')
+        year = request.query_params.get('year')
+        branch_id = request.query_params.get('branch')
+
+        qs = EvaluationResult.objects.select_related(
+            'student', 'student__classe', 'student__branche', 'user'
+        )
+
+        if month:
+            qs = qs.filter(month=month)
+        if year:
+            qs = qs.filter(year=year)
+        if branch_id:
+            qs = qs.filter(student__branche_id=branch_id)
+
+        qs = qs.exclude(result__isnull=True).exclude(result='')
+
+        data = []
+        for ev in qs:
+            try:
+                grade = float(ev.result)
+            except (TypeError, ValueError):
+                continue
+            data.append({
+                'name': ev.student.student_name,
+                'branch': ev.student.branche.nom if ev.student.branche else '',
+                'branch_id': ev.student.branche_id,
+                'section': ev.student.classe.nom if ev.student.classe else '',
+                'section_id': ev.student.classe_id,
+                'evaluator': ev.user.first_name if ev.user else '',
+                'grade': grade,
+                'evaluation_final': ev.evaluation_final or '',
+                'month': ev.month,
+                'year': ev.year,
+            })
+
+        return Response(data)
 
     @action(detail=False, methods=['get'], url_path='bulk-get')
     def bulk_get(self, request):
@@ -1818,7 +1921,7 @@ class EvaluationResultViewSet(viewsets.ModelViewSet):
             base_filter["student_id"] = student_id
 
         # -------- CURRENT REPORTS --------
-        reports_qs = EvaluationResult.objects.filter(**base_filter).select_related('student')
+        reports_qs = EvaluationResult.objects.filter(**base_filter).select_related('student').order_by('-result')
         serialized_data = EvaluationResultSerializer(reports_qs, many=True).data
 
         data = []
@@ -1841,6 +1944,15 @@ class EvaluationResultViewSet(viewsets.ModelViewSet):
         with transaction.atomic():
             for data in reports:
 
+                try:
+                    result = float(data.get('evaluation') or 0) \
+                           + float(data.get('elhasila')  or 0) \
+                           + float(data.get('progress')  or 0)
+                except (TypeError, ValueError):
+                    result = 0
+
+                evaluation_final = get_evaluation_final(result)
+
                 obj, is_created = EvaluationResult.objects.update_or_create(
                     student_id=data['student'],
                     month=data['month'],
@@ -1849,8 +1961,8 @@ class EvaluationResultViewSet(viewsets.ModelViewSet):
                         'evaluation': data.get('evaluation', ''),
                         'elhasila': data.get('elhasila', ''),
                         'progress': data.get('progress', ''),
-                        'result': data['result'],
-                        'evaluation_final': data['evaluation_final'],
+                        'result': result,
+                        'evaluation_final': evaluation_final,
                         'user': self.request.user,
                     }
                 )
@@ -3970,6 +4082,69 @@ def reactivate_student(request, student_id):
         return Response({"error": "الطالب غير موجود"}, status=404)
     except Exception as e:
         return Response({"error": str(e)}, status=400)
+
+
+@api_view(['GET'])
+def get_receipt_by_id(request):
+    receipt_id = request.GET.get('receipt_id')
+
+    try:
+        receipt = Receipt.objects.get(receipt_id=receipt_id)
+    except Receipt.DoesNotExist:
+        return Response({"message": "no receipt"}, status=404)
+
+    payments = list(Transaction.objects.filter(
+        receipt_payments__receipt=receipt
+    ).select_related('bank'))
+
+    student = receipt.student
+    first_bank = payments[0].bank if payments and payments[0].bank else None
+
+    data = {
+        "receipt_id": receipt.receipt_id,
+        "receipt_date": receipt.receipt_date,
+        "total_amount": receipt.total_amount,
+        "created_by": receipt.created_by.first_name if receipt.created_by else None,
+        "academic_year": {"year": receipt.academic_year.year if receipt.academic_year else None},
+        "student": {
+            "id": student.id,
+            "student_name": student.student_name,
+            "classe": {"nom": student.classe.nom} if student.classe else None,
+            "branche": {"nom": student.branche.nom} if student.branche else None,
+            "phone": student.phone,
+        } if student else None,
+        "agent": {
+            "id": receipt.agent.id,
+            "agent_name": receipt.agent.agent_name,
+        } if receipt.agent else None,
+        "bank": {
+            "id": first_bank.id,
+            "bank_name": first_bank.bank_name,
+            "category": first_bank.category,
+        } if first_bank else None,
+        "total_remaining": sum(p.remaining_amount for p in payments),
+        "total_due": sum(p.due_amount for p in payments),
+        "payments": [
+            {
+                "id": p.id,
+                "month": p.month,
+                "month_name_ar": convert_months_to_ar(p.month),
+                "paid_amount": p.paid_amount,
+                "due_amount": p.due_amount,
+                "remaining_amount": p.remaining_amount,
+            }
+            for p in payments if p.month
+        ],
+        "extras": [
+            {
+                "id": p.id,
+                "amount": p.paid_amount,
+                "des": p.description,
+            }
+            for p in payments if not p.month
+        ],
+    }
+    return Response(data)
 
 
 @api_view(['GET'])

@@ -86,6 +86,7 @@ urlpatterns = [
     path('api/tasfiyat-by-competition/', tasfiyats_by_competition, name='tasfiyats-by-competition'),
     path('participants-autocomplite/', participants_autocomplete, name='participants-autocomplite'),
     path('participants-list/', participants_list, name='participants-lists'),
+    path('get-receipt-by-id/', get_receipt_by_id, name='get-receipt-by-id'),
     path('get-last-receipt/', get_last_receipt, name='get-last-receipt'),
     path('get-last-agent-receipt/', get_last_agent_receipt, name='get-last-agent-receipts'),
 

@@ -387,7 +387,7 @@ class UtilisateurSerializer(serializers.ModelSerializer):
             'created_at'
         ]
         extra_kwargs = {
-            'password': {'write_only': True, 'required': False},
+            'password': {'write_only': True, 'required': False, 'allow_null': True},
             'created_at': {'read_only': True}
         }
 
