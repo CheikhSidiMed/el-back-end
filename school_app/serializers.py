@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Branche, Classe, Niveau, Agent, Etudiant, Mois, Exam, Paiement, Inscription, Garant, Attestation, GarantPaiement, SalaryPayment, Employee, Job, BankAccount, Receipt, ReceiptPayment, Utilisateur, Activity, AcademicYear, MonthlyReport, DailyAbsence, AccountCategory, Account, Transaction, Permission, Suspension, AbsenceActivity, AbsElmhdara, Competition, Tasfiya, Juge, Participant, Evaluation, CompetitionLevel, PaiementTransations, EtudiantCertified, QuarterlyReport, EvaluationResult
+from .models import Branche, Classe, Niveau, Agent, Etudiant, Mois, Exam, Paiement, Inscription, Garant, Attestation, GarantPaiement, SalaryPayment, Employee, Job, BankAccount, Receipt, ReceiptPayment, Utilisateur, Activity, AcademicYear, MonthlyReport, DailyAbsence, AccountCategory, Account, Transaction, Permission, Suspension, AbsenceActivity, AbsElmhdara, Competition, Tasfiya, Juge, Participant, Evaluation, CompetitionLevel, PaiementTransations, EtudiantCertified, QuarterlyReport, EvaluationResult, EvaluationPeriod
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
 
@@ -160,7 +160,17 @@ class MonthlyReportSerializer(serializers.ModelSerializer):
     class Meta:
         model = MonthlyReport
         fields = '__all__'
+class EvaluationPeriodSerializer(serializers.ModelSerializer):
+    academic_year_name = serializers.CharField(source='academic_year.year', read_only=True)
+
+    class Meta:
+        model = EvaluationPeriod
+        fields = '__all__'
+
+
 class EvaluationResultSerializer(serializers.ModelSerializer):
+    period_name = serializers.CharField(source='period.name', read_only=True)
+
     class Meta:
         model = EvaluationResult
         fields = '__all__'

@@ -18,6 +18,7 @@ router.register(r'receipts', ReceiptViewSet, basename="receipt")
 router.register(r'receipts-payment', ReceiptPaymentViewSet, basename="receipt-payment")
 router.register(r'academic-years', AcademicYearViewSet, basename="academic-year")
 router.register(r'monthly-report', MonthlyReportViewSet, basename="monthly-report")
+router.register(r'evaluation-periods', EvaluationPeriodViewSet, basename="evaluation-period")
 router.register(r'evaluation-results', EvaluationResultViewSet, basename="evaluation-result")
 router.register(r'quarterly-report', QuarterlyReportViewSet, basename="quarterly-report")
 router.register(r'daily-absence', DailyAbsenceViewSet, basename="daily-absence")
@@ -68,6 +69,7 @@ urlpatterns = [
     path('api/unpaid-dont-have-agent/', unpaid_students_not_have_agent, name='unpaid-dont-have-agents'),
     path('api/class-stats/', class_payment_stats, name='class-stats'),
     path('api/student/payments/', student_payments, name='student-payments'),
+    
     path('api/student-by-level/', student_by_level, name='student-by-levels'),
     path('api/student/unpaid-months/', unpaid_months_until_suspend, name='student-unpaid-months'),
     path('api/garant/payments/', garant_payments, name='garant-payments'),

@@ -1,7 +1,7 @@
 from django.shortcuts import render
 from rest_framework import viewsets
 from rest_framework.response import Response
-from .models import Branche, Classe, Niveau, Agent, Receipt, SalaryPayment, ReceiptPayment, PaiementTransations, Exam, AbsElmhdara, Job, Inscription, Garant, GarantPaiement, Employee, Transaction, Etudiant, Mois, Paiement, BankAccount, Receipt, ReceiptPayment, Utilisateur, Activity, AcademicYear, MonthlyReport, DailyAbsence, AccountCategory, Account, Permission, Suspension, AbsenceActivity, Competition, Tasfiya, Juge, EvaluationResult, Participant, Evaluation, CompetitionLevel, EtudiantCertified, QuarterlyReport, Attestation
+from .models import Branche, Classe, Niveau, Agent, Receipt, SalaryPayment, ReceiptPayment, PaiementTransations, Exam, AbsElmhdara, Job, Inscription, Garant, GarantPaiement, Employee, Transaction, Etudiant, Mois, Paiement, BankAccount, Receipt, ReceiptPayment, Utilisateur, Activity, AcademicYear, MonthlyReport, DailyAbsence, AccountCategory, Account, Permission, Suspension, AbsenceActivity, Competition, Tasfiya, Juge, EvaluationResult, EvaluationPeriod, Participant, Evaluation, CompetitionLevel, EtudiantCertified, QuarterlyReport, Attestation
 from .serializers import *
 from rest_framework_simplejwt.views import TokenObtainPairView
 from django.db import transaction
@@ -118,28 +118,25 @@ def format_progress(progress_thmn):
 
     progress_thmn = float(str(progress_thmn).replace(',', '.'))
 
-    # 🔥 LIMIT HARD CAP (60 max)
+    negative = progress_thmn < 0
+    abs_val = abs(progress_thmn)
+
     max_thmn = 60 * 8  # 60 hizb = 480 thmn
+    abs_val = min(abs_val, max_thmn)
 
-    if progress_thmn > max_thmn:
-        progress_thmn = max_thmn
-
-    ahzab = int(progress_thmn // 8)
-    thmn = progress_thmn % 8
+    ahzab = int(abs_val // 8)
+    thmn = abs_val % 8
 
     parts = []
 
     if ahzab:
-        if ahzab == 1:
-            parts.append("حزب")
-        else:
-            parts.append(f"{ahzab} حزب")
+        parts.append("حزب" if ahzab == 1 else f"{ahzab} حزب")
 
     if thmn != 0:
-        thmn_str = f"{thmn:.10g}"
-        parts.append(f"{thmn_str} ثمن")
+        parts.append(f"{thmn:.10g} ثمن")
 
-    return " و ".join(parts) if parts else "0"
+    result = " و ".join(parts) if parts else "0"
+    return f"-{result}" if negative else result
     
 
 def get_previous_academic_year(year_str):
@@ -174,9 +171,9 @@ def calculate_progress(current, previous):
 
     progress = current_total - prev_total
 
-    # CAP
+    # CAP (allow negative — student went backwards)
     max_progress = 60 * 8
-    progress = min(max(progress, 0), max_progress)
+    progress = min(progress, max_progress)
 
     return format_progress(progress)
 
@@ -335,6 +332,9 @@ class EtudiantViewSet(viewsets.ModelViewSet):
         if user.role and user.role.title == 'admin_m':
             queryset = queryset.filter(branche__in=user.branches.all())
 
+        if self.request.query_params.get('date_today') == '1':
+            from django.utils import timezone
+            queryset = queryset.filter(date_count=timezone.localdate())
 
         return queryset
 
@@ -1176,21 +1176,32 @@ class ReceiptViewSet(viewsets.ModelViewSet):
     def list(self, request, *args, **kwargs):
         qs = Receipt.objects.select_related(
             'student', 'student__classe', 'student__branche',
-            'agent', 'created_by', 'academic_year'
+            'agent', 'garant', 'employee',
+            'account', 'account__category',
+            'created_by', 'academic_year'
         ).order_by('-receipt_id')
 
         search = request.query_params.get('search', '').strip()
         date_from = request.query_params.get('date_from')
-        date_to = request.query_params.get('date_to')
+        date_to   = request.query_params.get('date_to')
 
         if search:
             qs = qs.filter(
                 Q(student__student_name__icontains=search) |
                 Q(agent__agent_name__icontains=search) |
+                Q(garant__name__icontains=search) |
+                Q(employee__full_name__icontains=search) |
+                Q(account__name__icontains=search) |
                 Q(receipt_id__icontains=search)
             )
+
         if date_from:
             qs = qs.filter(receipt_date__gte=date_from)
+        elif not date_to:
+            # no date filter supplied → default to today only
+            from django.utils import timezone
+            qs = qs.filter(receipt_date=timezone.localdate())
+
         if date_to:
             qs = qs.filter(receipt_date__lte=date_to)
 
@@ -1212,6 +1223,22 @@ class ReceiptViewSet(viewsets.ModelViewSet):
                     'id': r.agent.id,
                     'agent_name': r.agent.agent_name,
                 } if r.agent else None,
+                'garant': {
+                    'id': r.garant.id,
+                    'name': r.garant.name,
+                } if r.garant else None,
+                'employee': {
+                    'id': r.employee.id,
+                    'full_name': r.employee.full_name,
+                    'phone': r.employee.phone,
+                    'number': r.employee.number,
+                } if r.employee else None,
+                'account': {
+                    'id': r.account.id,
+                    'name': r.account.name,
+                    'number': r.account.number,
+                    'category_name': r.account.category.name if r.account.category else None,
+                } if r.account else None,
             })
         return Response(data)
 
@@ -1268,6 +1295,13 @@ class EmployeeViewSet(viewsets.ModelViewSet):
         # 🔴 Aucun accès
         return Employee.objects.none()
 
+    def perform_update(self, serializer):
+        old_is_actif = self.get_object().is_actif
+        employee = serializer.save()
+        if employee.user and employee.is_actif != old_is_actif:
+            employee.user.is_active = employee.is_actif
+            employee.user.save(update_fields=['is_active'])
+
     @transaction.atomic
     def perform_create(self, serializer):
         employee = serializer.save()
@@ -1300,54 +1334,6 @@ class EmployeeViewSet(viewsets.ModelViewSet):
                 user.branches.set([employee.branche])
             employee.user = user
             employee.save()
-
-    # @transaction.atomic
-    # def perform_create(self, serializer):
-    #     employee = serializer.save()
-
-    #     # 🔹 Création automatique d'un utilisateur si conditions remplies
-    #     if employee.job and employee.job.title != "worker" and employee.phone:
-    #         user, created = Utilisateur.objects.get_or_create(
-    #             phone=employee.phone,
-    #             defaults={
-    #                 "first_name": employee.full_name,
-    #                 "role": employee.job,
-    #                 "is_active": True,
-    #             }
-    #         )
-    #         user.set_password(employee.phone)
-    #         user.classe = employee.classe
-    #         user.save()
-
-    #         if employee.branche:
-    #             user.branches.set([employee.branche])
-    #         employee.user = user
-    #         employee.save()
-
-    #     # 🔹 Créer transaction initiale si balance > 0
-    #     if employee.balance > 0:
-    #         txn = Transaction.objects.create(
-    #             employee=employee,
-    #             due_amount=0,
-    #             paid_amount=employee.balance,
-    #             remaining_amount=0,
-    #             description=f"الرصيد الابتدائي للموظف {employee.full_name}",
-    #             date=timezone.now(),
-    #             user=employee.user
-    #         )
-
-    #         receipt = Receipt.objects.create(
-    #             employee=employee,
-    #             total_amount=employee.balance,
-    #             receipt_date=timezone.now().date(),
-    #             created_by=employee.user,
-    #             receipt_description=f"الرصيد الابتدائي للموظف {employee.full_name}"
-    #         )
-
-    #         ReceiptPayment.objects.create(
-    #             receipt=receipt,
-    #             transaction=txn
-    #         )
 
     @action(detail=True, methods=['post'], url_path='activate')
     def activate_employee(self, request, pk=None):
@@ -1772,7 +1758,7 @@ class MonthlyReportViewSet(viewsets.ModelViewSet):
         prev_reports = MonthlyReport.objects.filter(
             student__classe_id=classe_id,
             month=prev_month,
-            year=year
+            year=prev_year  # fixed: was `year` (current), must use prev_year
         )
 
         prev_map = {r.student_id: r for r in prev_reports}
@@ -1798,22 +1784,9 @@ class MonthlyReportViewSet(viewsets.ModelViewSet):
 
             prev_report = prev_map.get(report.student_id)
 
-            # previous level
-            # serialized['previous_level'] = prev_report.current_level if prev_report else None
-
-            # progress
             try:
-                # current_total = int(report.ahzab or 0) + int(report.thmn or 0)
-                current_total = (safe_float(report.ahzab or 0) * 8) + safe_float(report.thmn or 0)
-                prev_total = 0
-
-                if prev_report:
-                    prev_total = safe_float(prev_report.ahzab or 0) + safe_float(prev_report.thmn or 0)
-
-                progress = current_total - prev_total
-                serialized['progress'] = format_progress(progress)
-
-            except:
+                serialized['progress'] = calculate_progress(report, prev_report)
+            except Exception as e:
                 print("Progress error:", str(e))
                 serialized['progress'] = None
 
@@ -1842,38 +1815,41 @@ def get_evaluation_final(result):
     return ''
 
 
+class EvaluationPeriodViewSet(viewsets.ModelViewSet):
+    queryset = EvaluationPeriod.objects.select_related('academic_year').all()
+    serializer_class = EvaluationPeriodSerializer
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        year_id = self.request.query_params.get('academic_year')
+        if year_id:
+            qs = qs.filter(academic_year_id=year_id)
+        return qs
+
+
 class EvaluationResultViewSet(viewsets.ModelViewSet):
     queryset = EvaluationResult.objects.all()
     serializer_class = EvaluationResultSerializer
-    
+
     def get_queryset(self):
         queryset = super().get_queryset()
         student_id = self.request.query_params.get('student_id')
-        month = self.request.query_params.get('month')
-        year = self.request.query_params.get('year')
-
-        if student_id and month and year:
-            queryset = queryset.filter(
-                student_id=student_id,
-                month=month,
-                year=year
-            )
+        period_id  = self.request.query_params.get('period')
+        if student_id and period_id:
+            queryset = queryset.filter(student_id=student_id, period_id=period_id)
         return queryset
 
     @action(detail=False, methods=['get'], url_path='ranking')
     def ranking(self, request):
-        month = request.query_params.get('month')
-        year = request.query_params.get('year')
+        period_id = request.query_params.get('period')
         branch_id = request.query_params.get('branch')
 
         qs = EvaluationResult.objects.select_related(
-            'student', 'student__classe', 'student__branche', 'user'
+            'student', 'student__classe', 'student__branche', 'user', 'period'
         )
 
-        if month:
-            qs = qs.filter(month=month)
-        if year:
-            qs = qs.filter(year=year)
+        if period_id:
+            qs = qs.filter(period_id=period_id)
         if branch_id:
             qs = qs.filter(student__branche_id=branch_id)
 
@@ -1894,46 +1870,29 @@ class EvaluationResultViewSet(viewsets.ModelViewSet):
                 'evaluator': ev.user.first_name if ev.user else '',
                 'grade': grade,
                 'evaluation_final': ev.evaluation_final or '',
-                'month': ev.month,
-                'year': ev.year,
+                'period': ev.period.name if ev.period else '',
+                'period_id': ev.period_id,
             })
 
         return Response(data)
 
     @action(detail=False, methods=['get'], url_path='bulk-get')
     def bulk_get(self, request):
-
-        classe_id = request.query_params.get('classe')
-        month = request.query_params.get('month')
-        year = request.query_params.get('year')
+        classe_id  = request.query_params.get('classe')
+        period_id  = request.query_params.get('period')
         student_id = request.query_params.get('student')
 
         base_filter = {
             "student__classe_id": classe_id,
-            "month": month,
-            "year": year
+            "period_id": period_id,
         }
-
-        # =========================
-        # APPLY STUDENT FILTER
-        # =========================
         if student_id:
             base_filter["student_id"] = student_id
 
-        # -------- CURRENT REPORTS --------
-        reports_qs = EvaluationResult.objects.filter(**base_filter).select_related('student').order_by('-result')
-        serialized_data = EvaluationResultSerializer(reports_qs, many=True).data
-
-        data = []
-
-        # =========================
-        # LOOP (LIGHTWEIGHT)
-        # =========================
-        for item in serialized_data:
-            data.append(item)
-
+        reports_qs = EvaluationResult.objects.filter(**base_filter).select_related('student', 'period').order_by('-result')
+        data = EvaluationResultSerializer(reports_qs, many=True).data
         return Response(data)
-    
+
     @action(detail=False, methods=['post'], url_path='bulk-save')
     def bulk_save(self, request):
         reports = request.data
@@ -1943,7 +1902,6 @@ class EvaluationResultViewSet(viewsets.ModelViewSet):
 
         with transaction.atomic():
             for data in reports:
-
                 try:
                     result = float(data.get('evaluation') or 0) \
                            + float(data.get('elhasila')  or 0) \
@@ -1955,42 +1913,26 @@ class EvaluationResultViewSet(viewsets.ModelViewSet):
 
                 obj, is_created = EvaluationResult.objects.update_or_create(
                     student_id=data['student'],
-                    month=data['month'],
-                    year=data['year'],
+                    period_id=data['period'],
                     defaults={
-                        'evaluation': data.get('evaluation', ''),
-                        'elhasila': data.get('elhasila', ''),
-                        'progress': data.get('progress', ''),
-                        'result': result,
+                        'evaluation':       data.get('evaluation', ''),
+                        'elhasila':         data.get('elhasila', ''),
+                        'progress':         data.get('progress', ''),
+                        'result':           result,
                         'evaluation_final': evaluation_final,
-                        'user': self.request.user,
+                        'user':             self.request.user,
                     }
                 )
 
                 created += int(is_created)
                 updated += int(not is_created)
-
                 saved_reports.append(obj)
 
-        # -------- نفس منطق bulk_get --------
         if not saved_reports:
             return Response({"created": 0, "updated": 0, "data": []})
 
-        classe_id = saved_reports[0].student.classe_id
-        month = saved_reports[0].month
-        year = saved_reports[0].year
-
-        result = []
-
-        for report in saved_reports:
-            serialized = EvaluationResultSerializer(report).data
-            result.append(serialized)
-
-        return Response({
-            "created": created,
-            "updated": updated,
-            "data": result
-        }, status=status.HTTP_200_OK)
+        result_data = [EvaluationResultSerializer(r).data for r in saved_reports]
+        return Response({"created": created, "updated": updated, "data": result_data}, status=status.HTTP_200_OK)
 
 class QuarterlyReportViewSet(viewsets.ModelViewSet):
     queryset = QuarterlyReport.objects.all()
@@ -3012,14 +2954,11 @@ def assign_participants(request):
 @api_view(['GET'])
 def unpaid_months_until_suspend(request):
     student_id = request.GET.get('student_id')
-    suspend_date = request.GET.get('suspend_date')
+    suspend_date_str = request.GET.get('suspend_date')
     full_month_fee = request.GET.get('month_fee')
 
-    # -----------------------
-    # Validate input
-    # -----------------------
     try:
-        suspend_date = date.fromisoformat(suspend_date)
+        suspend_date = date.fromisoformat(suspend_date_str)
         full_month_fee = Decimal(full_month_fee)
     except:
         return Response({"error": "Invalid suspend_date or month_fee"}, status=400)
@@ -3037,106 +2976,98 @@ def unpaid_months_until_suspend(request):
         'يوليو','أغسطس','سبتمبر','أكتوبر','نوفمبر','ديسمبر'
     ]
 
+    registration_date = student.date_inscription
+    registration_year = registration_date.year
+
     unpaid = []
 
-    # -----------------------
-    # Get relevant academic years
-    # -----------------------
     academic_years = AcademicYear.objects.filter(
         start_date__lte=suspend_date,
-        end_date__gte=student.date_inscription
+        end_date__gte=registration_date
     ).order_by('start_date')
 
     for academic_year in academic_years:
+        year_selected = int(academic_year.name)
 
-        # -----------------------
-        # Payments (IMPORTANT FIX)
-        # -----------------------
+        # Same payment fetch as student_payments — includes remaining_amount from DB
         payments = Paiement.objects.filter(
             etudiant=student,
             academic_year=academic_year
-        ).values('month', 'paid_amount')
+        ).values('month', 'paid_amount', 'remaining_amount')
+        payments_dict = {p['month']: p for p in payments}
 
-        payments_dict = {
-            (academic_year.id, p['month']): Decimal(p['paid_amount'])
-            for p in payments
-        }
+        # Month window for this academic year
+        period_start = max(registration_date, academic_year.start_date)
+        period_end   = min(suspend_date, academic_year.end_date)
 
-        # -----------------------
-        # Define period
-        # -----------------------
-        current_date = max(student.date_inscription, academic_year.start_date)
-        last_date = min(suspend_date, academic_year.end_date)
+        cursor = date(period_start.year, period_start.month, 1)
 
-        cursor = date(current_date.year, current_date.month, 1)
-
-        while cursor <= last_date.replace(day=1):
-
+        while cursor <= period_end.replace(day=1):
             month = cursor.month
-            year = cursor.year
-            days_in_month = monthrange(year, month)[1]
+            year  = cursor.year
+            payment = payments_dict.get(month)
 
-            # -----------------------
-            # Calculate due amount
-            # -----------------------
+            # ── Due amount (mirrors student_payments logic) ──────────────
+            if year_selected < registration_year:
+                # Academic year entirely before inscription
+                if payment:
+                    remaining_amount = Decimal(payment['remaining_amount'])
+                    due_amount  = Decimal(payment['paid_amount']) + remaining_amount
+                    paid_amount = Decimal(payment['paid_amount'])
+                else:
+                    due_amount = paid_amount = remaining_amount = Decimal("0.00")
 
-            # First month (registration)
-            if year == student.date_inscription.year and month == student.date_inscription.month:
-                days_present = days_in_month - student.date_inscription.day + 1
-                proportion = Decimal(days_present) / Decimal(days_in_month)
-                due_amount = (full_month_fee * proportion).quantize(Decimal("0.01"))
+            elif year_selected == registration_year:
+                if month < registration_date.month:
+                    due_amount = paid_amount = remaining_amount = Decimal("0.00")
+                elif month == registration_date.month:
+                    days_in_month = monthrange(year, month)[1]
+                    proportion = Decimal(days_in_month - registration_date.day + 1) / Decimal(days_in_month)
+                    due_amount = (full_month_fee * proportion).quantize(Decimal("0.01"))
+                    if payment:
+                        paid_amount      = Decimal(payment['paid_amount'])
+                        remaining_amount = due_amount - paid_amount
+                    else:
+                        paid_amount      = Decimal("0.00")
+                        remaining_amount = due_amount
+                else:
+                    due_amount = full_month_fee
+                    if payment:
+                        paid_amount      = Decimal(payment['paid_amount'])
+                        remaining_amount = Decimal(payment['remaining_amount']) if payment.get('remaining_amount') is not None else due_amount - paid_amount
+                    else:
+                        paid_amount      = Decimal("0.00")
+                        remaining_amount = due_amount
 
-            # Last month (suspension)
-            elif year == suspend_date.year and month == suspend_date.month:
-                # 🔥 choose ONE behavior:
-
-                # OPTION A (recommended): FULL month
-                due_amount = full_month_fee
-
-                # OPTION B (if you want partial):
-                # days_present = suspend_date.day - 1
-                # proportion = Decimal(days_present) / Decimal(days_in_month)
-                # due_amount = (full_month_fee * proportion).quantize(Decimal("0.01"))
-
-            # Normal months
             else:
                 due_amount = full_month_fee
+                if payment:
+                    paid_amount      = Decimal(payment['paid_amount'])
+                    remaining_amount = Decimal(payment['remaining_amount']) if payment.get('remaining_amount') is not None else due_amount - paid_amount
+                else:
+                    paid_amount      = Decimal("0.00")
+                    remaining_amount = due_amount
 
-            # -----------------------
-            # Paid / Remaining
-            # -----------------------
-            paid_amount = payments_dict.get((academic_year.id, month), Decimal("0.00"))
-            remaining = due_amount - paid_amount
-
-            # -----------------------
-            # Skip fully paid months ✅
-            # -----------------------
-            if remaining > 0:
+            # ── Only include months with an outstanding balance ──────────
+            if remaining_amount > 0:
                 unpaid.append({
                     "academic_year": academic_year.name,
                     "month": month,
                     "month_name_ar": ARABIC_MONTHS[month - 1],
-                    "due_amount": float(due_amount),
-                    "paid_amount": float(paid_amount),
-                    "remaining_amount": float(remaining)
+                    "due_amount":       float(due_amount),
+                    "paid_amount":      float(paid_amount),
+                    "remaining_amount": float(remaining_amount),
+                    "status": "partial" if paid_amount > 0 else "unpaid",
                 })
 
-            # -----------------------
             # Next month
-            # -----------------------
-            if month == 12:
-                cursor = date(year + 1, 1, 1)
-            else:
-                cursor = date(year, month + 1, 1)
+            cursor = date(year + 1, 1, 1) if month == 12 else date(year, month + 1, 1)
 
-    # -----------------------
-    # Final response
-    # -----------------------
     total_unpaid = sum(u["remaining_amount"] for u in unpaid)
 
     return Response({
         "student_id": student.id,
-        "suspend_date": suspend_date,
+        "suspend_date": suspend_date_str,
         "total_unpaid": float(total_unpaid),
         "unpaid_months": unpaid
     })
@@ -4089,17 +4020,63 @@ def get_receipt_by_id(request):
     receipt_id = request.GET.get('receipt_id')
 
     try:
-        receipt = Receipt.objects.get(receipt_id=receipt_id)
+        receipt = Receipt.objects.select_related(
+            'student__classe', 'student__branche',
+            'agent', 'garant__account', 'employee',
+            'account__category', 'academic_year', 'created_by'
+        ).get(receipt_id=receipt_id)
     except Receipt.DoesNotExist:
         return Response({"message": "no receipt"}, status=404)
 
-    payments = list(Transaction.objects.filter(
-        receipt_payments__receipt=receipt
-    ).select_related('bank'))
+    # Agent receipts use PaiementTransations; student/garant receipts use Transaction
+    if receipt.agent:
+        paiements = list(PaiementTransations.objects.filter(
+            receipt=receipt
+        ).select_related('bank', 'etudiant', 'etudiant__classe'))
+        first_bank = paiements[0].bank if paiements and paiements[0].bank else None
+        payments_data = [
+            {
+                "id": p.id,
+                "student": p.etudiant.id if p.etudiant else None,
+                "student_name": p.etudiant.student_name if p.etudiant else None,
+                "classe": p.etudiant.classe.nom if p.etudiant and p.etudiant.classe else None,
+                "month_name_ar": convert_months_to_ar_m(str(p.month)),
+                "paid_amount": p.paid_amount,
+                "due_amount": p.due_amount,
+                "remaining_amount": p.remaining_amount,
+            }
+            for p in paiements if p.month
+        ]
+        extras_data = [
+            {"id": p.id, "amount": p.paid_amount, "des": p.description}
+            for p in paiements if not p.month
+        ]
+        total_remaining = sum(p.remaining_amount for p in paiements)
+        total_due = sum(p.due_amount for p in paiements)
+    else:
+        payments = list(Transaction.objects.filter(
+            receipt_payments__receipt=receipt
+        ).select_related('bank'))
+        first_bank = payments[0].bank if payments and payments[0].bank else None
+        payments_data = [
+            {
+                "id": p.id,
+                "month": p.month,
+                "month_name_ar": convert_months_to_ar(p.month),
+                "paid_amount": p.paid_amount,
+                "due_amount": p.due_amount,
+                "remaining_amount": p.remaining_amount,
+            }
+            for p in payments if p.month
+        ]
+        extras_data = [
+            {"id": p.id, "amount": p.paid_amount, "des": p.description}
+            for p in payments if not p.month
+        ]
+        total_remaining = sum(p.remaining_amount for p in payments)
+        total_due = sum(p.due_amount for p in payments)
 
     student = receipt.student
-    first_bank = payments[0].bank if payments and payments[0].bank else None
-
     data = {
         "receipt_id": receipt.receipt_id,
         "receipt_date": receipt.receipt_date,
@@ -4116,33 +4093,35 @@ def get_receipt_by_id(request):
         "agent": {
             "id": receipt.agent.id,
             "agent_name": receipt.agent.agent_name,
+            "phone": receipt.agent.phone if hasattr(receipt.agent, 'phone') else None,
         } if receipt.agent else None,
+        "garant": {
+            "id": receipt.garant.id,
+            "name": receipt.garant.name,
+            "phone": receipt.garant.phone,
+            "account_name": receipt.garant.account.name if receipt.garant.account else None,
+        } if receipt.garant else None,
+        "employee": {
+            "id": receipt.employee.id,
+            "full_name": receipt.employee.full_name,
+            "phone": receipt.employee.phone,
+            "number": receipt.employee.number,
+        } if receipt.employee else None,
+        "account": {
+            "id": receipt.account.id,
+            "name": receipt.account.name,
+            "number": receipt.account.number,
+            "category_name": receipt.account.category.name if receipt.account.category else None,
+        } if receipt.account else None,
         "bank": {
             "id": first_bank.id,
             "bank_name": first_bank.bank_name,
             "category": first_bank.category,
         } if first_bank else None,
-        "total_remaining": sum(p.remaining_amount for p in payments),
-        "total_due": sum(p.due_amount for p in payments),
-        "payments": [
-            {
-                "id": p.id,
-                "month": p.month,
-                "month_name_ar": convert_months_to_ar(p.month),
-                "paid_amount": p.paid_amount,
-                "due_amount": p.due_amount,
-                "remaining_amount": p.remaining_amount,
-            }
-            for p in payments if p.month
-        ],
-        "extras": [
-            {
-                "id": p.id,
-                "amount": p.paid_amount,
-                "des": p.description,
-            }
-            for p in payments if not p.month
-        ],
+        "total_remaining": total_remaining,
+        "total_due": total_due,
+        "payments": payments_data,
+        "extras": extras_data,
     }
     return Response(data)
 

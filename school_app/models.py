@@ -389,10 +389,36 @@ class DailyAbsence(models.Model):
     def __str__(self):
         return f"{self.student.full_name} - {self.date} ({self.get_session_display()})"
 
+class EvaluationPeriod(models.Model):
+    name = models.CharField(max_length=100)
+    academic_year = models.ForeignKey(
+        AcademicYear,
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name='evaluation_periods'
+    )
+    start_date = models.DateField(null=True, blank=True)
+    end_date = models.DateField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return self.name
+
+
 class EvaluationResult(models.Model):
     student = models.ForeignKey(Etudiant, on_delete=models.CASCADE)
-    year = models.CharField(max_length=20)
-    month = models.CharField(max_length=20)
+    period = models.ForeignKey(
+        EvaluationPeriod,
+        on_delete=models.CASCADE,
+        null=True, blank=True,
+        related_name='results'
+    )
+    # kept nullable for backward compatibility with existing rows
+    year = models.CharField(max_length=20, blank=True, null=True)
+    month = models.CharField(max_length=20, blank=True, null=True)
 
     evaluation = models.CharField(max_length=100, blank=True, null=True)
     elhasila = models.CharField(max_length=100, blank=True, null=True)
@@ -408,10 +434,10 @@ class EvaluationResult(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        unique_together = ['student', 'month', 'year']
+        unique_together = ['student', 'period']
 
     def __str__(self):
-        return f"{self.student.full_name} - {self.month} {self.year}"
+        return f"{self.student.student_name} - {self.period}"
 
 class Employee(models.Model):
     number = models.CharField(max_length=50, unique=True, blank=True, null=True)  # matricule ou code employé
