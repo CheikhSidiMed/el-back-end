@@ -26,13 +26,12 @@ class Command(BaseCommand):
         with connections['mysql_db'].cursor() as cursor:
             cursor.execute("""
                 SELECT 
-                    donate_account_id, 
                     transaction_description, 
                     amount, 
                     transaction_type, 
                     bank_id, 
                     transaction_date
-                FROM donate_transactions
+                FROM donate_transactions WHERE id = 10005
             """)
             rows = cursor.fetchall()
 
@@ -40,7 +39,6 @@ class Command(BaseCommand):
 
         for row in rows:
             (
-                donate_account_id, 
                 transaction_description, 
                 amount, 
                 transaction_type, 
@@ -55,12 +53,21 @@ class Command(BaseCommand):
 
             transactions.append(
                 Transaction(
-                    account=donate_account_id,
+                    account=18,
                     paid_amount=amount,
                     date=date,
                     description=transaction_description,
                     type=transaction_type,
-                    bank=bank_id or 0,
+                    bank = (
+                        3 if bank_id == 4 else
+                        5 if bank_id == 20 else
+                        6 if bank_id == 2 else
+                        7 if bank_id == 3 else
+                        8 if bank_id == 19 else
+                        9 if bank_id == 5 else
+                        2 if bank_id is None else
+                        bank_id
+                    ),
                     user=bank_id,
 
                 )
@@ -72,78 +79,3 @@ class Command(BaseCommand):
         self.stdout.write(
             self.style.SUCCESS(f"{len(transactions)} transactions importés avec succès")
         )
-
-[
-    {
-        "id": 1,
-        "bank_name": "بنكيلي",
-        "account_number": "5501",
-        "balance": "89633.88",
-        "category": 2,
-        "user": null
-    },
-    {
-        "id": 2,
-        "bank_name": "صندوق فرع البنات و الوقف",
-        "account_number": "5602",
-        "balance": "715186.00",
-        "category": 1,
-        "user": null
-    },
-    {
-        "id": 3,
-        "bank_name": "بيم بنك",
-        "account_number": "5504",
-        "balance": "31000.00",
-        "category": 2,
-        "user": null
-    },
-    {
-        "id": 4,
-        "bank_name": "الصندوق - المركزي",
-        "account_number": "5601",
-        "balance": "90038.27",
-        "category": 1,
-        "user": null
-    },
-    {
-        "id": 5,
-        "bank_name": "غزة بي",
-        "account_number": "5506",
-        "balance": "49169.35",
-        "category": 2,
-        "user": null
-    },
-    {
-        "id": 6,
-        "bank_name": "السداد",
-        "account_number": "5503",
-        "balance": "217081.32",
-        "category": 2,
-        "user": null
-    },
-    {
-        "id": 7,
-        "bank_name": "مصرفي",
-        "account_number": "5502",
-        "balance": "190664.52",
-        "category": 2,
-        "user": null
-    },
-    {
-        "id": 8,
-        "bank_name": "كليك",
-        "account_number": "5505",
-        "balance": "30900.00",
-        "category": 2,
-        "user": null
-    },
-    {
-        "id": 9,
-        "bank_name": "أخرى",
-        "account_number": "5506",
-        "balance": "36694.00",
-        "category": 1,
-        "user": null
-    }
-]
