@@ -1,7 +1,7 @@
 from django.core.management.base import BaseCommand
 from django.db import connections, transaction
 from datetime import date, datetime
-from school_app.models import Etudiant
+from school_app.models import Transaction
 
 
 def parse_date(d):
