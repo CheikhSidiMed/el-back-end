@@ -1159,6 +1159,11 @@ class EtudiantCertified(models.Model):
         ('أخر', 'أخر'),
     ]
 
+    GENDER_CHOICES = [
+        ('ذكور', 'ذكور'),
+        ('إناث', 'إناث'),
+    ]
+
     full_name = models.CharField(max_length=255)
     NNI = models.CharField(max_length=50)
     phone = models.CharField(max_length=20)
@@ -1181,6 +1186,14 @@ class EtudiantCertified(models.Model):
         max_length=20,
         choices=TYPE_CHOICES
     )
+
+    gender = models.CharField(
+        max_length=10,
+        choices=GENDER_CHOICES,
+        default='ذكور'
+    )
+
+    ijazat = models.JSONField(default=list, blank=True)
 
     def __str__(self):
         return self.full_name

@@ -2555,6 +2555,77 @@ class AttestationViewSet(viewsets.ModelViewSet):
     queryset = Attestation.objects.all()
     serializer_class = AttestationSerializer
 
+    def perform_create(self, serializer):
+        attestation = serializer.save()
+
+        if str(self.request.data.get('level', '')) != '60':
+            return
+
+        etudiant = attestation.etudiant
+        if not etudiant:
+            return
+
+        gender_map = {'M': 'ذكور', 'F': 'إناث'}
+        gender = gender_map.get(etudiant.gender, 'ذكور')
+
+        type_ijaza = self.request.data.get('type_ijaza', 'حافظ')
+        type_certified = self.request.data.get('type_certified', 'حفص')
+
+        EtudiantCertified.objects.create(
+            full_name=etudiant.student_name or '',
+            NNI=etudiant.nni or '',
+            phone=etudiant.phone or '',
+            date=attestation.date_emission,
+            birth_date=etudiant.birth_date or attestation.date_emission,
+            birth_city=etudiant.birth_place or '',
+            photo=etudiant.student_photo or None,
+            year=attestation.date_emission.year,
+            type_ijaza=type_ijaza,
+            type=type_certified,
+            gender=gender,
+        )
+
+@api_view(['GET'])
+def attestation_certified_stats(request):
+    from django.db.models import Count
+
+    attestation_by_type = (
+        Attestation.objects
+        .values('type')
+        .annotate(count=Count('id'))
+        .order_by('type')
+    )
+
+    certified_by_type_ijaza = (
+        EtudiantCertified.objects
+        .values('type_ijaza')
+        .annotate(count=Count('id'))
+        .order_by('type_ijaza')
+    )
+
+    certified_by_type = (
+        EtudiantCertified.objects
+        .values('type')
+        .annotate(count=Count('id'))
+        .order_by('type')
+    )
+
+    certified_by_gender = (
+        EtudiantCertified.objects
+        .values('gender')
+        .annotate(count=Count('id'))
+        .order_by('gender')
+    )
+
+    return Response({
+        'attestation_by_type':      list(attestation_by_type),
+        'certified_by_type_ijaza':  list(certified_by_type_ijaza),
+        'certified_by_type':        list(certified_by_type),
+        'certified_by_gender':      list(certified_by_gender),
+        'total_attestations':       Attestation.objects.count(),
+        'total_certified':          EtudiantCertified.objects.count(),
+    })
+
 @api_view(['GET'])
 def daily_absence_list(request):
     queryset = DailyAbsence.objects.all()
@@ -2968,8 +3039,16 @@ def unpaid_months_until_suspend(request):
     except:
         return Response({"error": "Student not found"}, status=404)
 
-    if suspend_date <= student.date_inscription:
+    if suspend_date < student.date_inscription:
         return Response({"error": "Suspend before inscription"}, status=400)
+
+    if suspend_date == student.date_inscription:
+        return Response({
+            "student_id": student.id,
+            "suspend_date": suspend_date_str,
+            "total_unpaid": 0.0,
+            "unpaid_months": []
+        })
 
     ARABIC_MONTHS = [
         'يناير','فبراير','مارس','أبريل','مايو','يونيو',
@@ -3008,6 +3087,10 @@ def unpaid_months_until_suspend(request):
             payment = payments_dict.get(month)
 
             # ── Due amount (mirrors student_payments logic) ──────────────
+            is_suspend_month      = (year == suspend_date.year and month == suspend_date.month)
+            is_registration_month = (year == registration_date.year and month == registration_date.month)
+            days_in_month = monthrange(year, month)[1]
+
             if year_selected < registration_year:
                 # Academic year entirely before inscription
                 if payment:
@@ -3020,9 +3103,29 @@ def unpaid_months_until_suspend(request):
             elif year_selected == registration_year:
                 if month < registration_date.month:
                     due_amount = paid_amount = remaining_amount = Decimal("0.00")
-                elif month == registration_date.month:
-                    days_in_month = monthrange(year, month)[1]
+                elif is_registration_month and is_suspend_month:
+                    # Inscription and suspension in the same month → pay only the days between
+                    days_to_pay = suspend_date.day - registration_date.day
+                    proportion = Decimal(days_to_pay) / Decimal(days_in_month)
+                    due_amount = (full_month_fee * proportion).quantize(Decimal("0.01"))
+                    if payment:
+                        paid_amount      = Decimal(payment['paid_amount'])
+                        remaining_amount = due_amount - paid_amount
+                    else:
+                        paid_amount      = Decimal("0.00")
+                        remaining_amount = due_amount
+                elif is_registration_month:
                     proportion = Decimal(days_in_month - registration_date.day + 1) / Decimal(days_in_month)
+                    due_amount = (full_month_fee * proportion).quantize(Decimal("0.01"))
+                    if payment:
+                        paid_amount      = Decimal(payment['paid_amount'])
+                        remaining_amount = due_amount - paid_amount
+                    else:
+                        paid_amount      = Decimal("0.00")
+                        remaining_amount = due_amount
+                elif is_suspend_month:
+                    # Partial suspend month → pay only up to the suspend day
+                    proportion = Decimal(suspend_date.day) / Decimal(days_in_month)
                     due_amount = (full_month_fee * proportion).quantize(Decimal("0.01"))
                     if payment:
                         paid_amount      = Decimal(payment['paid_amount'])
@@ -3040,7 +3143,12 @@ def unpaid_months_until_suspend(request):
                         remaining_amount = due_amount
 
             else:
-                due_amount = full_month_fee
+                if is_suspend_month:
+                    # Partial suspend month → pay only up to the suspend day
+                    proportion = Decimal(suspend_date.day) / Decimal(days_in_month)
+                    due_amount = (full_month_fee * proportion).quantize(Decimal("0.01"))
+                else:
+                    due_amount = full_month_fee
                 if payment:
                     paid_amount      = Decimal(payment['paid_amount'])
                     remaining_amount = Decimal(payment['remaining_amount']) if payment.get('remaining_amount') is not None else due_amount - paid_amount

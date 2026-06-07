@@ -68,6 +68,7 @@ urlpatterns = [
     path('api/unpaid-by-agent/', unpaid_by_agent, name='unpaid-by-agents'),
     path('api/unpaid-dont-have-agent/', unpaid_students_not_have_agent, name='unpaid-dont-have-agents'),
     path('api/class-stats/', class_payment_stats, name='class-stats'),
+    path('api/attestation-certified-stats/', attestation_certified_stats, name='attestation-certified-stats'),
     path('api/student/payments/', student_payments, name='student-payments'),
     
     path('api/student-by-level/', student_by_level, name='student-by-levels'),
