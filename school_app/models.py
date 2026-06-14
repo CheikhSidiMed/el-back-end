@@ -1203,6 +1203,7 @@ class Attestation(models.Model):
         ('certificat', 'إفادة'),
         ('felicitation', 'تهنئة'),
         ('condolence', 'تعزية'),
+        ('ethanis-students', 'تهنئة طلاب'),
     ]
 
     etudiant = models.ForeignKey(

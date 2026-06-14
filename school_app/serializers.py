@@ -169,7 +169,8 @@ class EvaluationPeriodSerializer(serializers.ModelSerializer):
 
 
 class EvaluationResultSerializer(serializers.ModelSerializer):
-    period_name = serializers.CharField(source='period.name', read_only=True)
+    period_name  = serializers.CharField(source='period.name', read_only=True)
+    student_name = serializers.CharField(source='student.student_name', read_only=True)
 
     class Meta:
         model = EvaluationResult

@@ -1881,6 +1881,8 @@ class EvaluationResultViewSet(viewsets.ModelViewSet):
         classe_id  = request.query_params.get('classe')
         period_id  = request.query_params.get('period')
         student_id = request.query_params.get('student')
+        start_date = request.query_params.get('start_date')  # YYYY-MM-DD
+        end_date   = request.query_params.get('end_date')    # YYYY-MM-DD
 
         base_filter = {
             "student__classe_id": classe_id,
@@ -1890,7 +1892,28 @@ class EvaluationResultViewSet(viewsets.ModelViewSet):
             base_filter["student_id"] = student_id
 
         reports_qs = EvaluationResult.objects.filter(**base_filter).select_related('student', 'period').order_by('-result')
-        data = EvaluationResultSerializer(reports_qs, many=True).data
+        data = list(EvaluationResultSerializer(reports_qs, many=True).data)
+
+        # ---- absence count per student in the requested date range ----
+        if start_date and end_date:
+            abs_filter = {
+                "student__classe_id": classe_id,
+                "date__range": (start_date, end_date),
+            }
+            if student_id:
+                abs_filter["student_id"] = student_id
+
+            absence_qs = (
+                DailyAbsence.objects
+                .filter(**abs_filter)
+                .values('student_id')
+                .annotate(total=Count('id'))
+            )
+            absence_map = {a['student_id']: a['total'] for a in absence_qs}
+
+            for item in data:
+                item['absence_count'] = absence_map.get(item['student'], 0)
+
         return Response(data)
 
     @action(detail=False, methods=['post'], url_path='bulk-save')
@@ -3757,6 +3780,8 @@ def unpaid_students_not_have_agent(request):
 def unpaid_by_agent(request):
     year_id = request.GET.get('year_id')
     month = request.GET.get('month')
+    branch_id = request.GET.get('branch_id')
+    class_id = request.GET.get('class_id')
 
     # Conversion sécurisée du mois
     if month in [None, "", "null", "undefined"]:
@@ -3777,8 +3802,14 @@ def unpaid_by_agent(request):
         payment_nature='mensuel',
         etat='inscrit',
         is_active=True,
-        agent__isnull=False  # ne garder que ceux qui ont un agent
-    ).exclude(date_desectivation__isnull=False).select_related('agent')
+        agent__isnull=False
+    ).exclude(date_desectivation__isnull=False).select_related('agent', 'branche', 'classe')
+
+    if branch_id:
+        students = students.filter(branche_id=branch_id)
+
+    if class_id:
+        students = students.filter(classe_id=class_id)
 
     agents = {}
     today = date.today()
@@ -3861,7 +3892,9 @@ def unpaid_by_agent(request):
                 "phone": student.agent.whatsapp_phone if student.agent and student.agent.whatsapp_phone else student.phone,
                 "months_unpaid": ", ".join(months_unpaid),
                 "unpaid_amount": float(total_unpaid),
-                "date_inscription": student.date_inscription
+                "date_inscription": student.date_inscription,
+                "branch_name": student.branche.nom if student.branche else "",
+                "class_name": student.classe.nom if student.classe else ""
             })
 
     return Response(list(agents.values()))
