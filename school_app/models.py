@@ -1229,3 +1229,23 @@ class Attestation(models.Model):
     def __str__(self):
         return f"{self.etudiant.student_name} - {self.type}"
 
+
+class ExitCertificate(models.Model):
+    student = models.ForeignKey(
+        'Etudiant', on_delete=models.CASCADE,
+        related_name='exit_certificates', verbose_name='الطالب'
+    )
+    status   = models.TextField(blank=True, null=True, verbose_name='الحالة العامة للمحفوظات')
+    level    = models.CharField(max_length=200, blank=True, null=True, verbose_name='المستوى')
+    notes    = models.TextField(blank=True, null=True, verbose_name='الملحوظات')
+    date     = models.DateField(default=timezone.localdate, verbose_name='التاريخ')
+    created_at  = models.DateTimeField(auto_now_add=True)
+    updated_at  = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        verbose_name = 'إفادة تحديد مستوى'
+
+    def __str__(self):
+        return f"إفادة - {self.student.student_name} - {self.date}"
+

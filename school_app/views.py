@@ -1,7 +1,7 @@
 from django.shortcuts import render
 from rest_framework import viewsets
 from rest_framework.response import Response
-from .models import Branche, Classe, Niveau, Agent, Receipt, SalaryPayment, ReceiptPayment, PaiementTransations, Exam, AbsElmhdara, Job, Inscription, Garant, GarantPaiement, Employee, Transaction, Etudiant, Mois, Paiement, BankAccount, Receipt, ReceiptPayment, Utilisateur, Activity, AcademicYear, MonthlyReport, DailyAbsence, AccountCategory, Account, Permission, Suspension, AbsenceActivity, Competition, Tasfiya, Juge, EvaluationResult, EvaluationPeriod, Participant, Evaluation, CompetitionLevel, EtudiantCertified, QuarterlyReport, Attestation
+from .models import Branche, Classe, Niveau, Agent, Receipt, SalaryPayment, ReceiptPayment, PaiementTransations, Exam, AbsElmhdara, Job, Inscription, Garant, GarantPaiement, Employee, Transaction, Etudiant, Mois, Paiement, BankAccount, Receipt, ReceiptPayment, Utilisateur, Activity, AcademicYear, MonthlyReport, DailyAbsence, AccountCategory, Account, Permission, Suspension, AbsenceActivity, Competition, Tasfiya, Juge, EvaluationResult, EvaluationPeriod, Participant, Evaluation, CompetitionLevel, EtudiantCertified, QuarterlyReport, Attestation, ExitCertificate
 from .serializers import *
 from rest_framework_simplejwt.views import TokenObtainPairView
 from django.db import transaction
@@ -271,7 +271,7 @@ class AbsElmhdaraViewSet(viewsets.ModelViewSet):
     filter_backends = [DjangoFilterBackend]
     
 class NiveauViewSet(viewsets.ModelViewSet):
-    queryset = Niveau.objects.all()
+    queryset = Niveau.objects.annotate(student_count=Count('etudiant')).all()
     serializer_class = NiveauSerializer
 
 class AgentViewSet(viewsets.ModelViewSet):
@@ -1181,29 +1181,33 @@ class ReceiptViewSet(viewsets.ModelViewSet):
             'created_by', 'academic_year'
         ).order_by('-receipt_id')
 
-        search = request.query_params.get('search', '').strip()
-        date_from = request.query_params.get('date_from')
-        date_to   = request.query_params.get('date_to')
+        search     = request.query_params.get('search', '').strip()
+        date_from  = request.query_params.get('date_from')
+        date_to    = request.query_params.get('date_to')
+        receipt_id = request.query_params.get('receipt_id', '').strip()
 
-        if search:
-            qs = qs.filter(
-                Q(student__student_name__icontains=search) |
-                Q(agent__agent_name__icontains=search) |
-                Q(garant__name__icontains=search) |
-                Q(employee__full_name__icontains=search) |
-                Q(account__name__icontains=search) |
-                Q(receipt_id__icontains=search)
-            )
+        # Direct receipt-number lookup — bypasses date filters
+        if receipt_id:
+            qs = qs.filter(receipt_id=receipt_id)
+        else:
+            if search:
+                qs = qs.filter(
+                    Q(student__student_name__icontains=search) |
+                    Q(agent__agent_name__icontains=search) |
+                    Q(garant__name__icontains=search) |
+                    Q(employee__full_name__icontains=search) |
+                    Q(account__name__icontains=search)
+                )
 
-        if date_from:
-            qs = qs.filter(receipt_date__gte=date_from)
-        elif not date_to:
-            # no date filter supplied → default to today only
-            from django.utils import timezone
-            qs = qs.filter(receipt_date=timezone.localdate())
+            if date_from:
+                qs = qs.filter(receipt_date__gte=date_from)
+            elif not date_to:
+                # no date filter supplied → default to today only
+                from django.utils import timezone
+                qs = qs.filter(receipt_date=timezone.localdate())
 
-        if date_to:
-            qs = qs.filter(receipt_date__lte=date_to)
+            if date_to:
+                qs = qs.filter(receipt_date__lte=date_to)
 
         data = []
         for r in qs[:300]:
@@ -2607,6 +2611,20 @@ class AttestationViewSet(viewsets.ModelViewSet):
             type=type_certified,
             gender=gender,
         )
+
+class ExitCertificateViewSet(viewsets.ModelViewSet):
+    queryset = ExitCertificate.objects.select_related(
+        'student', 'student__classe', 'student__branche', 'student__level'
+    ).all()
+    serializer_class = ExitCertificateSerializer
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        student_id = self.request.query_params.get('student')
+        if student_id:
+            qs = qs.filter(student_id=student_id)
+        return qs
+
 
 @api_view(['GET'])
 def attestation_certified_stats(request):

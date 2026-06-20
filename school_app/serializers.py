@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Branche, Classe, Niveau, Agent, Etudiant, Mois, Exam, Paiement, Inscription, Garant, Attestation, GarantPaiement, SalaryPayment, Employee, Job, BankAccount, Receipt, ReceiptPayment, Utilisateur, Activity, AcademicYear, MonthlyReport, DailyAbsence, AccountCategory, Account, Transaction, Permission, Suspension, AbsenceActivity, AbsElmhdara, Competition, Tasfiya, Juge, Participant, Evaluation, CompetitionLevel, PaiementTransations, EtudiantCertified, QuarterlyReport, EvaluationResult, EvaluationPeriod
+from .models import Branche, Classe, Niveau, Agent, Etudiant, Mois, Exam, Paiement, Inscription, Garant, Attestation, GarantPaiement, SalaryPayment, Employee, Job, BankAccount, Receipt, ReceiptPayment, Utilisateur, Activity, AcademicYear, MonthlyReport, DailyAbsence, AccountCategory, Account, Transaction, Permission, Suspension, AbsenceActivity, AbsElmhdara, Competition, Tasfiya, Juge, Participant, Evaluation, CompetitionLevel, PaiementTransations, EtudiantCertified, QuarterlyReport, EvaluationResult, EvaluationPeriod, ExitCertificate
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
 
@@ -30,9 +30,11 @@ class AbsElmhdaraSerializer(serializers.ModelSerializer):
         fields = '__all__'
 
 class NiveauSerializer(serializers.ModelSerializer):
+    student_count = serializers.IntegerField(read_only=True)
+
     class Meta:
         model = Niveau
-        fields = '__all__'
+        fields = ['id', 'level_name', 'price', 'student_count']
 
 class AgentSerializer(serializers.ModelSerializer):
     class Meta:
@@ -677,3 +679,16 @@ class AttestationSerializer(serializers.ModelSerializer):
     class Meta:
         model = Attestation
         fields = '__all__'
+
+
+class ExitCertificateSerializer(serializers.ModelSerializer):
+    student_name  = serializers.CharField(source='student.student_name', read_only=True)
+    classe_nom    = serializers.CharField(source='student.classe.nom',   read_only=True)
+    branche_nom   = serializers.CharField(source='student.branche.nom',  read_only=True)
+
+    class Meta:
+        model  = ExitCertificate
+        fields = [
+            'id', 'student', 'student_name', 'classe_nom', 'branche_nom',
+            'status', 'level', 'notes', 'date', 'created_at', 'updated_at'
+        ]

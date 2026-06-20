@@ -57,6 +57,7 @@ router.register('competition-levels', CompetitionLevelViewSet, basename="competi
 router.register('paiement-transations', PaiementTransationsViewSet, basename="paiement-transation")
 router.register('etudiant-certifieds', EtudiantCertifiedViewSet, basename="etudiant-certifieds")
 router.register('attestations', AttestationViewSet, basename="attestations")
+router.register('exit-certificates', ExitCertificateViewSet, basename="exit-certificate")
 
 urlpatterns = [
     path('', include(router.urls)),
