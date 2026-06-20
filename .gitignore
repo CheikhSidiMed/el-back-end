@@ -1,3 +1,45 @@
-# Django media & static
-/media/
-/staticfiles/
+# Python
+
+__pycache__/
+
+*.py[cod]
+
+*$py.class
+
+
+
+# Virtualenv
+
+venv/
+
+.venv/
+
+
+
+# Django
+
+db.sqlite3
+
+media/
+
+staticfiles/
+
+
+
+# Logs
+
+*.log
+
+
+
+# IDE
+
+.vscode/
+
+.idea/
+
+
+
+# OS
+
+.DS_Store
