@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Branche, Classe, Niveau, Agent, Etudiant, Mois, Exam, Paiement, Inscription, Garant, Attestation, GarantPaiement, SalaryPayment, Employee, Job, BankAccount, Receipt, ReceiptPayment, Utilisateur, Activity, AcademicYear, MonthlyReport, DailyAbsence, AccountCategory, Account, Transaction, Permission, Suspension, AbsenceActivity, AbsElmhdara, Competition, Tasfiya, Juge, Participant, Evaluation, CompetitionLevel, PaiementTransations, EtudiantCertified, QuarterlyReport, EvaluationResult, EvaluationPeriod, ExitCertificate
+from .models import Branche, Classe, Niveau, Agent, Etudiant, Mois, Exam, Paiement, Inscription, Garant, Attestation, GarantPaiement, SalaryPayment, Employee, Job, BankAccount, Receipt, ReceiptPayment, Utilisateur, Activity, AcademicYear, MonthlyReport, DailyAbsence, AccountCategory, Account, Transaction, Permission, Suspension, AbsenceActivity, AbsElmhdara, Competition, Tasfiya, Juge, Participant, Evaluation, CompetitionLevel, PaiementTransations, EtudiantCertified, QuarterlyReport, EvaluationResult, EvaluationPeriod, EvaluationMonthResult, ExitCertificate
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
 
@@ -37,6 +37,11 @@ class NiveauSerializer(serializers.ModelSerializer):
         fields = ['id', 'level_name', 'price', 'student_count']
 
 class AgentSerializer(serializers.ModelSerializer):
+    has_account = serializers.SerializerMethodField()
+
+    def get_has_account(self, obj):
+        return hasattr(obj, 'user_account') and obj.user_account is not None
+
     class Meta:
         model = Agent
         fields = '__all__'
@@ -176,6 +181,14 @@ class EvaluationResultSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = EvaluationResult
+        fields = '__all__'
+
+class EvaluationMonthResultSerializer(serializers.ModelSerializer):
+    period_name  = serializers.CharField(source='period.name', read_only=True)
+    student_name = serializers.CharField(source='student.student_name', read_only=True)
+
+    class Meta:
+        model = EvaluationMonthResult
         fields = '__all__'
 
 class QuarterlyReportSerializer(serializers.ModelSerializer):
@@ -461,8 +474,8 @@ class MyTokenObtainPairSerializer(TokenObtainPairSerializer):
 
     def validate(self, attrs):
         data = super().validate(attrs)
-        # Now inject the serialized user data into the response:
         data['user'] = UtilisateurSerializer(self.user).data
+        data['user']['agent_profile_id'] = self.user.agent_profile_id
         return data
 
 class AcademicYearSerializer(serializers.ModelSerializer):

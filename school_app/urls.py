@@ -58,6 +58,8 @@ router.register('paiement-transations', PaiementTransationsViewSet, basename="pa
 router.register('etudiant-certifieds', EtudiantCertifiedViewSet, basename="etudiant-certifieds")
 router.register('attestations', AttestationViewSet, basename="attestations")
 router.register('exit-certificates', ExitCertificateViewSet, basename="exit-certificate")
+router.register('evaluation-month-results', EvaluationMonthResultViewSet, basename="evaluation-month-result")
+router.register('agent-portal', AgentPortalViewSet, basename="agent-portal")
 
 urlpatterns = [
     path('', include(router.urls)),

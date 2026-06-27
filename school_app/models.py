@@ -48,6 +48,7 @@ class Job(models.Model):
         ('user', 'مراقب'),
         ('worker', 'عامل'),
         ('hakam', 'حكم'),
+        ('agent', 'وكيل'),
     )
     title = models.CharField(max_length=150, choices=ROLES, unique=True, default='user')
     description = models.TextField(blank=True, null=True)
@@ -85,6 +86,13 @@ class UtilisateurManager(BaseUserManager):
         return self.create_user(phone, password, **extra_fields)
 
 class Utilisateur(AbstractUser):
+
+    agent_profile = models.OneToOneField(
+        'Agent',
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name='user_account'
+    )
 
     role = models.ForeignKey(
         'Job',
@@ -438,6 +446,36 @@ class EvaluationResult(models.Model):
 
     def __str__(self):
         return f"{self.student.student_name} - {self.period}"
+
+
+class EvaluationMonthResult(models.Model):
+    student = models.ForeignKey(Etudiant, on_delete=models.CASCADE, related_name='month_results')
+    period = models.ForeignKey(
+        EvaluationPeriod,
+        on_delete=models.CASCADE,
+        related_name='month_results'
+    )
+    louh = models.CharField(max_length=100, blank=True, null=True)          # اللوح
+    ahzab = models.CharField(max_length=100, blank=True, null=True)         # عدد الأحزاب
+    adaa = models.CharField(max_length=100, blank=True, null=True)          # مستوى الأداء
+    taqdir = models.CharField(max_length=100, blank=True, null=True)        # التقدير النهائي
+    notes = models.TextField(blank=True, null=True)                         # ملاحظات
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name='month_results'
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ['student', 'period']
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"{self.student.student_name} - {self.period}"
+
 
 class Employee(models.Model):
     number = models.CharField(max_length=50, unique=True, blank=True, null=True)  # matricule ou code employé

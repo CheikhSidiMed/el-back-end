@@ -1,7 +1,7 @@
 from django.shortcuts import render
 from rest_framework import viewsets
 from rest_framework.response import Response
-from .models import Branche, Classe, Niveau, Agent, Receipt, SalaryPayment, ReceiptPayment, PaiementTransations, Exam, AbsElmhdara, Job, Inscription, Garant, GarantPaiement, Employee, Transaction, Etudiant, Mois, Paiement, BankAccount, Receipt, ReceiptPayment, Utilisateur, Activity, AcademicYear, MonthlyReport, DailyAbsence, AccountCategory, Account, Permission, Suspension, AbsenceActivity, Competition, Tasfiya, Juge, EvaluationResult, EvaluationPeriod, Participant, Evaluation, CompetitionLevel, EtudiantCertified, QuarterlyReport, Attestation, ExitCertificate
+from .models import Branche, Classe, Niveau, Agent, Receipt, SalaryPayment, ReceiptPayment, PaiementTransations, Exam, AbsElmhdara, Job, Inscription, Garant, GarantPaiement, Employee, Transaction, Etudiant, Mois, Paiement, BankAccount, Receipt, ReceiptPayment, Utilisateur, Activity, AcademicYear, MonthlyReport, DailyAbsence, AccountCategory, Account, Permission, Suspension, AbsenceActivity, Competition, Tasfiya, Juge, EvaluationResult, EvaluationPeriod, EvaluationMonthResult, Participant, Evaluation, CompetitionLevel, EtudiantCertified, QuarterlyReport, Attestation, ExitCertificate
 from .serializers import *
 from rest_framework_simplejwt.views import TokenObtainPairView
 from django.db import transaction
@@ -303,6 +303,24 @@ class AgentViewSet(viewsets.ModelViewSet):
             status=status.HTTP_204_NO_CONTENT
         )
 
+    @action(detail=True, methods=['post'], url_path='create-account')
+    def create_account(self, request, pk=None):
+        agent = self.get_object()
+        if hasattr(agent, 'user_account') and agent.user_account is not None:
+            return Response({'detail': 'الحساب موجود مسبقاً', 'phone': agent.user_account.phone}, status=200)
+        phone = agent.phone
+        if not phone:
+            return Response({'detail': 'لا يوجد رقم هاتف للوكيل'}, status=400)
+        if Utilisateur.objects.filter(phone=phone).exists():
+            return Response({'detail': 'يوجد مستخدم بهذا الرقم بالفعل'}, status=400)
+        agent_role, _ = Job.objects.get_or_create(title='agent', defaults={'description': 'وكيل'})
+        user = Utilisateur.objects.create_user(phone=phone, password=phone)
+        user.first_name = agent.agent_name
+        user.role = agent_role
+        user.agent_profile = agent
+        user.save()
+        return Response({'detail': 'تم إنشاء الحساب بنجاح', 'phone': phone, 'password': phone}, status=201)
+
 class AbsenceActivityViewSet(viewsets.ModelViewSet):
     queryset = AbsenceActivity.objects.all()
     serializer_class = AbsenceActivitySerializer
@@ -343,12 +361,60 @@ class EtudiantViewSet(viewsets.ModelViewSet):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
-        # ⚡ Utiliser serializer.save() pour créer l'objet
         instance = serializer.save()
 
-        # Rafraîchir le serializer pour renvoyer les données avec l'id généré
         response_serializer = self.get_serializer(instance)
         return Response(response_serializer.data, status=status.HTTP_201_CREATED)
+
+    def perform_update(self, serializer):
+        instance = serializer.instance
+        old_level_id = instance.level_id
+        old_fee = Decimal(str(instance.remaining))  # fee before level change
+
+        updated = serializer.save()
+
+        # If level changed and old fee was non-zero, freeze past months at old fee
+        if updated.level_id != old_level_id and old_fee > 0:
+            self._freeze_past_months_at_old_fee(updated, old_fee)
+
+        return updated
+
+    def _freeze_past_months_at_old_fee(self, student, old_fee):
+        today = timezone.localdate()
+        # Find the active academic year
+        academic_year = AcademicYear.objects.filter(
+            start_date__lte=today, end_date__gte=today
+        ).first()
+        if not academic_year:
+            return
+
+        inscription_date = student.date_inscription
+        if not inscription_date:
+            return
+
+        # Months range: from inscription month (if same year as start_date year) to last month
+        ay_start = academic_year.start_date
+        start_month = inscription_date.month if inscription_date >= ay_start else ay_start.month
+        end_month = today.month - 1  # don't touch current month
+        if end_month < start_month:
+            return
+
+        for month in range(start_month, end_month + 1):
+            already_exists = Paiement.objects.filter(
+                etudiant=student,
+                academic_year=academic_year,
+                month=month
+            ).exists()
+            if not already_exists:
+                Paiement.objects.create(
+                    etudiant=student,
+                    academic_year=academic_year,
+                    month=month,
+                    due_amount=old_fee,
+                    paid_amount=Decimal('0.00'),
+                    remaining_amount=old_fee,
+                    user=None,
+                )
 
     @action(detail=False, methods=['get'], url_path='etudiants-search-custem')
     def etudiants_search_custom(self, request):
@@ -2578,6 +2644,149 @@ class EvaluationViewSet(viewsets.ModelViewSet):
 
         return queryset
 
+class AgentPortalViewSet(viewsets.ViewSet):
+    """Read-only portal for agents — sees only their own students."""
+    permission_classes = [IsAuthenticated]
+
+    def _get_agent(self, request):
+        agent = getattr(request.user, 'agent_profile', None)
+        if not agent:
+            return None
+        return agent
+
+    @action(detail=False, methods=['get'], url_path='dashboard')
+    def dashboard(self, request):
+        agent = self._get_agent(request)
+        if not agent:
+            return Response({'detail': 'Not an agent account.'}, status=403)
+
+        today = timezone.localdate()
+        students = Etudiant.objects.filter(agent=agent, etat='inscrit') if hasattr(Etudiant, 'etat') else \
+                   Etudiant.objects.filter(agent=agent, is_inscrire=1)
+
+        student_ids = list(students.values_list('id', flat=True))
+
+        absences_month = DailyAbsence.objects.filter(
+            student_id__in=student_ids,
+            date__year=today.year,
+            date__month=today.month
+        ).count()
+
+        payments = Paiement.objects.filter(etudiant_id__in=student_ids)
+        total_paid = payments.aggregate(s=Sum('paid_amount'))['s'] or 0
+        total_remaining = payments.aggregate(s=Sum('remaining_amount'))['s'] or 0
+
+        return Response({
+            'student_count': students.count(),
+            'absences_this_month': absences_month,
+            'total_paid': float(total_paid),
+            'total_remaining': float(total_remaining),
+            'agent_name': agent.agent_name,
+            'agent_phone': agent.phone,
+        })
+
+    @action(detail=False, methods=['get'], url_path='students')
+    def students(self, request):
+        agent = self._get_agent(request)
+        if not agent:
+            return Response({'detail': 'Not an agent account.'}, status=403)
+
+        qs = Etudiant.objects.filter(agent=agent, is_inscrire=1).select_related(
+            'classe', 'level', 'branche'
+        ).order_by('student_name')
+
+        search = request.query_params.get('search', '').strip()
+        if search:
+            qs = qs.filter(student_name__icontains=search)
+
+        data = []
+        for s in qs:
+            data.append({
+                'id': s.id,
+                'student_name': s.student_name,
+                'gender': s.gender,
+                'classe': s.classe.nom if s.classe else '',
+                'level': s.level.level_name if s.level else '',
+                'branche': s.branche.nom if s.branche else '',
+                'etat': s.payment_nature,
+                'fees': float(s.fees),
+                'remaining': float(s.remaining),
+            })
+        return Response(data)
+
+    @action(detail=False, methods=['get'], url_path=r'students/(?P<student_id>\d+)')
+    def student_detail(self, request, student_id=None):
+        agent = self._get_agent(request)
+        if not agent:
+            return Response({'detail': 'Not an agent account.'}, status=403)
+
+        try:
+            student = Etudiant.objects.select_related('classe', 'level', 'branche', 'agent').get(
+                id=student_id, agent=agent
+            )
+        except Etudiant.DoesNotExist:
+            return Response({'detail': 'Not found.'}, status=404)
+
+        payments = Paiement.objects.filter(etudiant=student).select_related(
+            'academic_year'
+        ).order_by('academic_year__year', 'month')
+
+        absences = DailyAbsence.objects.filter(student=student).order_by('-date')[:50]
+
+        return Response({
+            'id': student.id,
+            'student_name': student.student_name,
+            'gender': student.gender,
+            'birth_date': str(student.birth_date) if student.birth_date else None,
+            'classe': student.classe.nom if student.classe else '',
+            'level': student.level.level_name if student.level else '',
+            'branche': student.branche.nom if student.branche else '',
+            'fees': float(student.fees),
+            'discount': float(student.discount),
+            'remaining': float(student.remaining),
+            'payment_nature': student.payment_nature,
+            'date_inscription': str(student.date_inscription),
+            'payments': [
+                {
+                    'id': p.id,
+                    'month': p.month,
+                    'academic_year': p.academic_year.year if p.academic_year else '',
+                    'due_amount': float(p.due_amount),
+                    'paid_amount': float(p.paid_amount),
+                    'remaining_amount': float(p.remaining_amount),
+                    'payment_date': str(p.payment_date),
+                }
+                for p in payments
+            ],
+            'absences': [
+                {
+                    'id': a.id,
+                    'date': str(a.date),
+                    'session': a.session,
+                    'justified': a.justified_absence,
+                    'remark': a.remark or '',
+                }
+                for a in absences
+            ],
+        })
+
+    @action(detail=False, methods=['get'], url_path='profile')
+    def profile(self, request):
+        agent = self._get_agent(request)
+        if not agent:
+            return Response({'detail': 'Not an agent account.'}, status=403)
+
+        return Response({
+            'id': agent.id,
+            'agent_name': agent.agent_name,
+            'phone': agent.phone,
+            'phone_2': agent.phone_2,
+            'whatsapp_phone': agent.whatsapp_phone,
+            'profession': agent.profession,
+            'user_first_name': request.user.first_name or '',
+        })
+
+
 class AttestationViewSet(viewsets.ModelViewSet):
     queryset = Attestation.objects.all()
     serializer_class = AttestationSerializer
@@ -2611,6 +2820,49 @@ class AttestationViewSet(viewsets.ModelViewSet):
             type=type_certified,
             gender=gender,
         )
+
+class EvaluationMonthResultViewSet(viewsets.ModelViewSet):
+    queryset = EvaluationMonthResult.objects.select_related('student', 'period').all()
+    serializer_class = EvaluationMonthResultSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        classe_id = self.request.query_params.get('classe')
+        period_id = self.request.query_params.get('period')
+        student_id = self.request.query_params.get('student')
+        if classe_id:
+            qs = qs.filter(student__classe_id=classe_id)
+        if period_id:
+            qs = qs.filter(period_id=period_id)
+        if student_id:
+            qs = qs.filter(student_id=student_id)
+        return qs
+
+    @action(detail=False, methods=['post'], url_path='bulk-save')
+    def bulk_save(self, request):
+        reports = request.data if isinstance(request.data, list) else request.data.get('results', [])
+        created = 0
+        updated = 0
+        for data in reports:
+            obj, is_created = EvaluationMonthResult.objects.update_or_create(
+                student_id=data['student'],
+                period_id=data['period'],
+                defaults={
+                    'louh':   data.get('louh', ''),
+                    'ahzab':  data.get('ahzab', ''),
+                    'adaa':   data.get('adaa', ''),
+                    'taqdir': data.get('taqdir', ''),
+                    'notes':  data.get('notes', ''),
+                    'user':   request.user,
+                }
+            )
+            if is_created:
+                created += 1
+            else:
+                updated += 1
+        return Response({'created': created, 'updated': updated})
+
 
 class ExitCertificateViewSet(viewsets.ModelViewSet):
     queryset = ExitCertificate.objects.select_related(
@@ -3823,8 +4075,15 @@ def unpaid_by_agent(request):
         agent__isnull=False
     ).exclude(date_desectivation__isnull=False).select_related('agent', 'branche', 'classe')
 
+    user = request.user
+    is_admin_g = user.role and user.role.title == 'admin_g'
+
     if branch_id:
         students = students.filter(branche_id=branch_id)
+    elif not is_admin_g:
+        user_branches = user.branches.values_list('id', flat=True)
+        if user_branches:
+            students = students.filter(branche_id__in=user_branches)
 
     if class_id:
         students = students.filter(classe_id=class_id)
