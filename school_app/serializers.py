@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Branche, Classe, Niveau, Agent, Etudiant, Mois, Exam, Paiement, Inscription, Garant, Attestation, GarantPaiement, SalaryPayment, Employee, Job, BankAccount, Receipt, ReceiptPayment, Utilisateur, Activity, AcademicYear, MonthlyReport, DailyAbsence, AccountCategory, Account, Transaction, Permission, Suspension, AbsenceActivity, AbsElmhdara, Competition, Tasfiya, Juge, Participant, Evaluation, CompetitionLevel, PaiementTransations, EtudiantCertified, QuarterlyReport, EvaluationResult, EvaluationPeriod, EvaluationMonthResult, ExitCertificate
+from .models import Branche, Classe, Niveau, Agent, Etudiant, Mois, Exam, Paiement, Inscription, Garant, Attestation, GarantPaiement, SalaryPayment, Employee, Job, BankAccount, Receipt, ReceiptPayment, Utilisateur, Activity, AcademicYear, MonthlyReport, DailyAbsence, AccountCategory, Account, Transaction, Permission, Suspension, AbsenceActivity, AbsElmhdara, Competition, Tasfiya, Juge, Participant, Evaluation, CompetitionLevel, PaiementTransations, EtudiantCertified, QuarterlyReport, EvaluationResult, EvaluationPeriod, EvaluationMonthResult, ExitCertificate, DeliveryReceipt
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
 
@@ -41,6 +41,17 @@ class AgentSerializer(serializers.ModelSerializer):
 
     def get_has_account(self, obj):
         return hasattr(obj, 'user_account') and obj.user_account is not None
+
+    def validate_phone(self, value):
+        qs = Agent.objects.filter(phone=value)
+        if self.instance:
+            qs = qs.exclude(pk=self.instance.pk)
+        if qs.exists():
+            existing = qs.first()
+            raise serializers.ValidationError(
+                f'رقم الهاتف مستخدم مسبقاً من قبل الوكيل: {existing.agent_name}'
+            )
+        return value
 
     class Meta:
         model = Agent
@@ -705,3 +716,16 @@ class ExitCertificateSerializer(serializers.ModelSerializer):
             'id', 'student', 'student_name', 'classe_nom', 'branche_nom',
             'status', 'level', 'notes', 'date', 'created_at', 'updated_at'
         ]
+
+
+class DeliveryReceiptSerializer(serializers.ModelSerializer):
+    student_name = serializers.CharField(source='student.student_name', read_only=True)
+
+    class Meta:
+        model = DeliveryReceipt
+        fields = [
+            'id', 'student', 'student_name', 'classe', 'academic_year',
+            'month', 'reception_date', 'delivery_date',
+            'result', 'notes', 'created_at', 'updated_at'
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at']

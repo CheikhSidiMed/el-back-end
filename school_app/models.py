@@ -202,6 +202,7 @@ class Etudiant(models.Model):
     suspension_reason = models.TextField(null=True, blank=True)
 
     current_city = models.CharField(max_length=100, null=True, blank=True)
+    is_residence = models.BooleanField(default=False)
     etat = models.CharField(
         max_length=50,
         choices=[('inscrit', 'Inscrit'), ('suspendu', 'Suspendu'), ('en_attente', 'En attente')],
@@ -751,7 +752,7 @@ class Transaction(models.Model):
         return f"Transaction {self.id} - {self.paid_amount}"
 
 class Receipt(models.Model):
-    receipt_id = models.AutoField(primary_key=True)
+    receipt_id = models.BigIntegerField(primary_key=True, editable=False)
     student = models.ForeignKey(
         'Etudiant',
         on_delete=models.SET_NULL,
@@ -811,6 +812,27 @@ class Receipt(models.Model):
 
     def __str__(self):
         return f"Receipt {self.receipt_id} - {self.total_amount}"
+
+    def save(self, *args, **kwargs):
+        if not self.receipt_id:
+            self.receipt_id = Receipt._generate_id()
+        super().save(*args, **kwargs)
+
+    @staticmethod
+    def _generate_id():
+        from django.utils import timezone as tz
+        from django.db import transaction as db_transaction
+        today = tz.localdate()
+        prefix = str(today.day) + str(today.month).zfill(2) + str(today.year % 100).zfill(2)
+        lo = int(prefix + '0000')
+        hi = int(prefix + '9999')
+        with db_transaction.atomic():
+            last = Receipt.objects.filter(
+                receipt_id__gte=lo,
+                receipt_id__lte=hi
+            ).select_for_update().order_by('-receipt_id').first()
+            counter = (last.receipt_id % 10000) + 1 if last else 1
+        return int(prefix + str(counter).zfill(4))
 
 class ReceiptPayment(models.Model):
     receipt = models.ForeignKey(
@@ -1287,3 +1309,37 @@ class ExitCertificate(models.Model):
     def __str__(self):
         return f"إفادة - {self.student.student_name} - {self.date}"
 
+
+
+class DeliveryReceipt(models.Model):
+    student = models.ForeignKey(
+        'Etudiant', on_delete=models.CASCADE,
+        related_name='delivery_receipts', verbose_name='الطالب'
+    )
+    classe = models.ForeignKey(
+        'Classe', on_delete=models.CASCADE,
+        related_name='delivery_receipts', verbose_name='القسم'
+    )
+    academic_year = models.ForeignKey(
+        'AcademicYear', on_delete=models.SET_NULL,
+        null=True, blank=True, related_name='delivery_receipts'
+    )
+    month = models.CharField(max_length=20, verbose_name='الشهر')
+    reception_date = models.DateField(null=True, blank=True, verbose_name='تاريخ الإستلام')
+    delivery_date  = models.DateField(null=True, blank=True, verbose_name='تاريخ التسليم')
+    result = models.TextField(blank=True, default='', verbose_name='النتيجة')
+    notes  = models.TextField(blank=True, default='', verbose_name='الملاحظات')
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL,
+        null=True, blank=True, related_name='delivery_receipts'
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ('student', 'classe', 'month', 'academic_year')
+        ordering = ['student__student_name']
+        verbose_name = 'استمارة الإستلام والتسليم'
+
+    def __str__(self):
+        return f"{self.student.student_name} - {self.month}"

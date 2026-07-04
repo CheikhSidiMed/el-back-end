@@ -95,6 +95,8 @@ urlpatterns = [
     path('get-receipt-by-id/', get_receipt_by_id, name='get-receipt-by-id'),
     path('get-last-receipt/', get_last_receipt, name='get-last-receipt'),
     path('get-last-agent-receipt/', get_last_agent_receipt, name='get-last-agent-receipts'),
+    path('delivery-receipts/', delivery_receipts_list, name='delivery-receipts-list'),
+    path('delivery-receipts/save/', delivery_receipts_bulk_save, name='delivery-receipts-save'),
 
 
 ]

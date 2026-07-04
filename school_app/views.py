@@ -1,7 +1,7 @@
 from django.shortcuts import render
 from rest_framework import viewsets
 from rest_framework.response import Response
-from .models import Branche, Classe, Niveau, Agent, Receipt, SalaryPayment, ReceiptPayment, PaiementTransations, Exam, AbsElmhdara, Job, Inscription, Garant, GarantPaiement, Employee, Transaction, Etudiant, Mois, Paiement, BankAccount, Receipt, ReceiptPayment, Utilisateur, Activity, AcademicYear, MonthlyReport, DailyAbsence, AccountCategory, Account, Permission, Suspension, AbsenceActivity, Competition, Tasfiya, Juge, EvaluationResult, EvaluationPeriod, EvaluationMonthResult, Participant, Evaluation, CompetitionLevel, EtudiantCertified, QuarterlyReport, Attestation, ExitCertificate
+from .models import Branche, Classe, Niveau, Agent, Receipt, SalaryPayment, ReceiptPayment, PaiementTransations, Exam, AbsElmhdara, Job, Inscription, Garant, GarantPaiement, Employee, Transaction, Etudiant, Mois, Paiement, BankAccount, Receipt, ReceiptPayment, Utilisateur, Activity, AcademicYear, MonthlyReport, DailyAbsence, AccountCategory, Account, Permission, Suspension, AbsenceActivity, Competition, Tasfiya, Juge, EvaluationResult, EvaluationPeriod, EvaluationMonthResult, Participant, Evaluation, CompetitionLevel, EtudiantCertified, QuarterlyReport, Attestation, ExitCertificate, DeliveryReceipt
 from .serializers import *
 from rest_framework_simplejwt.views import TokenObtainPairView
 from django.db import transaction
@@ -333,13 +333,15 @@ class EtudiantViewSet(viewsets.ModelViewSet):
     pagination_class = EtudiantPagination
     filter_backends = [DjangoFilterBackend, filters.SearchFilter]
     search_fields = ['student_name', 'id', 'phone', 'agent__agent_name', 'agent__phone', 'agent__phone_2', 'agent__whatsapp_phone', 'classe__nom', 'branche__nom' ]
-    filterset_fields = ['agent_id', 'payment_nature', 'branche_id', 'classe_id', 'etat', 'classe'] 
+    filterset_fields = ['agent_id', 'payment_nature', 'branche_id', 'classe_id', 'etat', 'classe']
 
     def get_queryset(self):
         queryset = Etudiant.objects.all()
         inscrire_param = self.request.query_params.get('inscrire', None)
 
-        if inscrire_param is None or inscrire_param == '1':
+        if inscrire_param == 'all':
+            pass  # no filter — include all students regardless of is_inscrire
+        elif inscrire_param is None or inscrire_param == '1':
             queryset = queryset.filter(is_inscrire=1)
         elif inscrire_param == '0':
             queryset = queryset.filter(is_inscrire=0)
@@ -349,6 +351,10 @@ class EtudiantViewSet(viewsets.ModelViewSet):
         # admin général → كل الفروع
         if user.role and user.role.title == 'admin_m':
             queryset = queryset.filter(branche__in=user.branches.all())
+
+        is_residence_param = self.request.query_params.get('is_residence', None)
+        if is_residence_param is not None:
+            queryset = queryset.filter(is_residence=is_residence_param.lower() in ('true', '1'))
 
         if self.request.query_params.get('date_today') == '1':
             from django.utils import timezone
@@ -2967,36 +2973,59 @@ def student_payments(request):
 
     registration_date = student.date_inscription
     registration_year = registration_date.year
-    year_selected = int(academic_year.name)
+    start_month = academic_year.start_date.month
+
+    # Suspension info
+    suspend_date = student.date_desectivation if student.etat == 'suspendu' and student.date_desectivation else None
 
     result = []
 
     for month in range(1, 13):
         payment = payments_dict.get(month)
 
+        # Compute the actual calendar year for this month within the academic year.
+        # Months >= start_month fall in the start year; others fall in start_year + 1.
+        calendar_year = academic_year.start_date.year if month >= start_month else academic_year.start_date.year + 1
+
+        # Months strictly after suspension → not due
+        if suspend_date:
+            if (calendar_year > suspend_date.year) or \
+               (calendar_year == suspend_date.year and month > suspend_date.month):
+                due_amount = paid_amount = remaining_amount = Decimal("0.00")
+                status, status_bool = "paid", True
+                result.append({
+                    "month": month,
+                    "month_name_ar": ARABIC_MONTHS[month - 1],
+                    "status": status,
+                    "status_bool": status_bool,
+                    "due_amount": float(due_amount),
+                    "paid_amount": float(paid_amount),
+                    "remaining_amount": float(remaining_amount)
+                })
+                continue
+
         # ---------------------------
-        # Année sélectionnée avant inscription
+        # Mois avant inscription
         # ---------------------------
-        if year_selected < registration_year:
+        if calendar_year < registration_year:
             if payment:
                 remaining_amount = Decimal(payment['remaining_amount'])
                 due_amount = Decimal(payment['paid_amount']) + remaining_amount
                 paid_amount = Decimal(payment['paid_amount'])
                 status, status_bool = ("unpaid", False) if remaining_amount > 0 else ("paid", True)
             else:
-                # Pas de paiement → considérer payé car étudiant pas encore inscrit
                 due_amount = paid_amount = remaining_amount = Decimal("0.00")
                 status, status_bool = "paid", True
 
         # ---------------------------
-        # Année sélectionnée = année d'inscription
+        # Mois de l'année d'inscription
         # ---------------------------
-        elif year_selected == registration_year:
+        elif calendar_year == registration_year:
             if month < registration_date.month:
                 due_amount = paid_amount = remaining_amount = Decimal("0.00")
                 status, status_bool = "paid", True
             elif month == registration_date.month:
-                days_in_month = monthrange(registration_year, month)[1]
+                days_in_month = monthrange(calendar_year, month)[1]
                 proportion = Decimal(days_in_month - registration_date.day + 1) / Decimal(days_in_month)
                 due_amount = (full_month_fee * proportion).quantize(Decimal("0.01"))
 
@@ -3030,7 +3059,7 @@ def student_payments(request):
                     status, status_bool = "unpaid", False
 
         # ---------------------------
-        # Année sélectionnée après inscription
+        # Mois après l'année d'inscription
         # ---------------------------
         else:
             due_amount = full_month_fee
@@ -3041,6 +3070,24 @@ def student_payments(request):
                 paid_amount = Decimal("0.00")
                 remaining_amount = due_amount
 
+            if remaining_amount <= 0:
+                status, status_bool = "paid", True
+            elif paid_amount > 0:
+                status, status_bool = "partial", False
+            else:
+                status, status_bool = "unpaid", False
+
+        # Override due_amount for suspension month (prorated) — mirrors unpaid_months_until_suspend
+        if suspend_date and calendar_year == suspend_date.year and month == suspend_date.month:
+            days_in_month = monthrange(calendar_year, month)[1]
+            if calendar_year == registration_year and month == registration_date.month:
+                # Inscription and suspension in the same month
+                days_to_pay = suspend_date.day - registration_date.day
+                proportion = Decimal(days_to_pay) / Decimal(days_in_month)
+            else:
+                proportion = Decimal(suspend_date.day) / Decimal(days_in_month)
+            due_amount = (full_month_fee * proportion).quantize(Decimal("0.01"))
+            remaining_amount = max(due_amount - paid_amount, Decimal("0.00"))
             if remaining_amount <= 0:
                 status, status_bool = "paid", True
             elif paid_amount > 0:
@@ -3384,8 +3431,8 @@ def unpaid_months_until_suspend(request):
             is_registration_month = (year == registration_date.year and month == registration_date.month)
             days_in_month = monthrange(year, month)[1]
 
-            if year_selected < registration_year:
-                # Academic year entirely before inscription
+            if year < registration_year:
+                # Calendar month before inscription year
                 if payment:
                     remaining_amount = Decimal(payment['remaining_amount'])
                     due_amount  = Decimal(payment['paid_amount']) + remaining_amount
@@ -3393,7 +3440,7 @@ def unpaid_months_until_suspend(request):
                 else:
                     due_amount = paid_amount = remaining_amount = Decimal("0.00")
 
-            elif year_selected == registration_year:
+            elif year == registration_year:
                 if month < registration_date.month:
                     due_amount = paid_amount = remaining_amount = Decimal("0.00")
                 elif is_registration_month and is_suspend_month:
@@ -3452,7 +3499,7 @@ def unpaid_months_until_suspend(request):
             # ── Only include months with an outstanding balance ──────────
             if remaining_amount > 0:
                 unpaid.append({
-                    "academic_year": academic_year.name,
+                    "academic_year": academic_year.year,
                     "month": month,
                     "month_name_ar": ARABIC_MONTHS[month - 1],
                     "due_amount":       float(due_amount),
@@ -3834,6 +3881,8 @@ def unpaid_students(request):
     except AcademicYear.DoesNotExist:
         return Response({"error": "année académique non trouvée"}, status=404)
 
+    is_residence_param = request.GET.get('is_residence', None)
+
     students = Etudiant.objects.filter(
         is_inscrire=1,
         payment_nature='mensuel',
@@ -3847,6 +3896,8 @@ def unpaid_students(request):
         students = students.filter(branche_id=branch_id)
     if class_id:
         students = students.filter(classe_id=class_id)
+    if is_residence_param is not None:
+        students = students.filter(is_residence=is_residence_param.lower() in ('true', '1'))
 
     result = []
     today = date.today()
@@ -3948,6 +3999,8 @@ def unpaid_students_not_have_agent(request):
     except AcademicYear.DoesNotExist:
         return Response({"error": "année académique non trouvée"}, status=404)
 
+    is_residence_param = request.GET.get('is_residence', None)
+
     # 🔹 Étudiants actifs sans agent
     students = Etudiant.objects.filter(
         is_inscrire=1,
@@ -3961,6 +4014,8 @@ def unpaid_students_not_have_agent(request):
         students = students.filter(branche_id=branch_id)
     if class_id:
         students = students.filter(classe_id=class_id)
+    if is_residence_param is not None:
+        students = students.filter(is_residence=is_residence_param.lower() in ('true', '1'))
 
     result = []
     today = date.today()
@@ -4067,6 +4122,8 @@ def unpaid_by_agent(request):
     except AcademicYear.DoesNotExist:
         return Response({"error": "année académique non trouvée"}, status=404)
 
+    is_residence_param = request.GET.get('is_residence', None)
+
     students = Etudiant.objects.filter(
         is_inscrire=1,
         payment_nature='mensuel',
@@ -4087,6 +4144,8 @@ def unpaid_by_agent(request):
 
     if class_id:
         students = students.filter(classe_id=class_id)
+    if is_residence_param is not None:
+        students = students.filter(is_residence=is_residence_param.lower() in ('true', '1'))
 
     agents = {}
     today = date.today()
@@ -4381,6 +4440,8 @@ def reactivate_student(request, student_id):
 
             academic_year = AcademicYear.objects.filter(year=academic_year_label).first()
             if not academic_year:
+                academic_year = AcademicYear.objects.filter(name=academic_year_label).first()
+            if not academic_year:
                 continue
 
             due_amount = Decimal(str(item["due_amount"]))
@@ -4667,3 +4728,67 @@ def get_last_agent_receipt(request):
     return Response(data)
 
     
+
+
+# ─────────────────────────────────────────────
+# Delivery Receipt
+# ─────────────────────────────────────────────
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def delivery_receipts_list(request):
+    """GET /delivery-receipts/?classe=&month=&academic_year="""
+    classe_id    = request.GET.get('classe')
+    month        = request.GET.get('month', '').strip()
+    academic_year_id = request.GET.get('academic_year')
+
+    qs = DeliveryReceipt.objects.filter(
+        classe_id=classe_id,
+        month=month,
+        academic_year_id=academic_year_id
+    ).select_related('student')
+
+    serializer = DeliveryReceiptSerializer(qs, many=True)
+    return Response(serializer.data)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def delivery_receipts_bulk_save(request):
+    """
+    POST /delivery-receipts/save/
+    Body: {
+      classe: int, month: str, academic_year: int,
+      rows: [{ student: int, reception_date: str|null, delivery_date: str|null, result: str, notes: str }]
+    }
+    """
+    data = request.data
+    classe_id        = data.get('classe')
+    month            = data.get('month', '').strip()
+    academic_year_id = data.get('academic_year')
+    rows             = data.get('rows', [])
+
+    if not classe_id or not month or not academic_year_id:
+        return Response({'detail': 'classe, month, academic_year requis'}, status=400)
+
+    saved = []
+    for row in rows:
+        student_id = row.get('student')
+        if not student_id:
+            continue
+        obj, _ = DeliveryReceipt.objects.update_or_create(
+            student_id=student_id,
+            classe_id=classe_id,
+            month=month,
+            academic_year_id=academic_year_id,
+            defaults={
+                'reception_date': row.get('reception_date') or None,
+                'delivery_date':  row.get('delivery_date')  or None,
+                'result':  row.get('result', ''),
+                'notes':   row.get('notes', ''),
+                'created_by': request.user,
+            }
+        )
+        saved.append(obj.id)
+
+    return Response({'saved': len(saved)}, status=200)
