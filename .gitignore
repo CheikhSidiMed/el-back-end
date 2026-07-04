@@ -43,3 +43,23 @@ staticfiles/
 # OS
 
 .DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environment
+.venv/
+env/
+venv/
+
+# Django
+db.sqlite3
+media/
+
+# VS Code
+.vscode/
+
+# macOS
+.DS_Store
