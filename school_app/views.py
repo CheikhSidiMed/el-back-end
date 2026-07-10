@@ -356,6 +356,10 @@ class EtudiantViewSet(viewsets.ModelViewSet):
         if is_residence_param is not None:
             queryset = queryset.filter(is_residence=is_residence_param.lower() in ('true', '1'))
 
+        level_id_param = self.request.query_params.get('level_id', None)
+        if level_id_param:
+            queryset = queryset.filter(level_id=level_id_param)
+
         if self.request.query_params.get('date_today') == '1':
             from django.utils import timezone
             queryset = queryset.filter(date_count=timezone.localdate())
@@ -4207,7 +4211,7 @@ def unpaid_by_agent(request):
                 months_unpaid.append(month_name)
                 total_unpaid += month_remaining
 
-            # passer au mois suivant
+            # passer au mois suivant 
             if current.month == 12:
                 current = date(current.year + 1, 1, 1)
             else:
@@ -4220,6 +4224,7 @@ def unpaid_by_agent(request):
                     "agent_id": agent_id,
                     "agent_name": student.agent.agent_name,
                     "agent_phone": student.agent.phone,
+                    "whatsapp_phone": student.agent.whatsapp_phone,
                     "students": []
                 }
 

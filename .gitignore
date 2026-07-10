@@ -1,65 +1,37 @@
-# Python
-
+# ── Python ──────────────────────────────────────────────────
 __pycache__/
-
 *.py[cod]
-
 *$py.class
+*.pyo
+*.pyd
 
-
-
-# Virtualenv
-
+# ── Virtual environments ─────────────────────────────────────
 venv/
-
-.venv/
-
-
-
-# Django
-
-db.sqlite3
-
-media/
-
-staticfiles/
-
-
-
-# Logs
-
-*.log
-
-
-
-# IDE
-
-.vscode/
-
-.idea/
-
-
-
-# OS
-
-.DS_Store
-
-# Python
-__pycache__/
-*.py[cod]
-*$py.class
-
-# Virtual environment
 .venv/
 env/
-venv/
+ENV/
 
-# Django
+# ── Django ───────────────────────────────────────────────────
 db.sqlite3
 media/
+staticfiles/
+*.log
+local_settings.py
 
-# VS Code
+# ── Migrations (optionnel — décommenter si tu ne veux pas les push)
+# */migrations/
+
+# ── Environment variables ────────────────────────────────────
+.env
+.env.*
+!.env.example
+
+# ── IDE ──────────────────────────────────────────────────────
 .vscode/
+.idea/
+*.swp
+*.swo
 
-# macOS
+# ── OS ───────────────────────────────────────────────────────
 .DS_Store
+Thumbs.db
