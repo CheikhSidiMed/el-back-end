@@ -4211,7 +4211,7 @@ def unpaid_by_agent(request):
                 months_unpaid.append(month_name)
                 total_unpaid += month_remaining
 
-            # passer au mois suivant
+            # passer au mois suivant 
             if current.month == 12:
                 current = date(current.year + 1, 1, 1)
             else:
