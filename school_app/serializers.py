@@ -151,8 +151,12 @@ class EtudiantSerializer(serializers.ModelSerializer):
         fields = '__all__'
     
     def get_last_ahzab(self, obj):
-        last_report = MonthlyReport.objects.filter(student=obj).order_by('-created_at').first()
-        return last_report.ahzab if last_report else 1
+        last_report = (MonthlyReport.objects
+                       .filter(student=obj, ahzab__isnull=False)
+                       .exclude(ahzab='')
+                       .order_by('-created_at')
+                       .first())
+        return last_report.ahzab if last_report else None
 
 class MoisSerializer(serializers.ModelSerializer):
     class Meta:
