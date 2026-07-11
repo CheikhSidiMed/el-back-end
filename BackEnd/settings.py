@@ -92,6 +92,7 @@ WSGI_APPLICATION = 'BackEnd.wsgi.application'
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
+        # 'NAME': 'elmanara_prod',
         'NAME': 'elmanara_db',
         'USER': 'postgres',
         'PASSWORD': 'root',
