@@ -1,7 +1,7 @@
 from django.shortcuts import render
 from rest_framework import viewsets
 from rest_framework.response import Response
-from .models import Branche, Classe, Niveau, Agent, Receipt, SalaryPayment, ReceiptPayment, PaiementTransations, Exam, AbsElmhdara, Job, Inscription, Garant, GarantPaiement, Employee, Transaction, Etudiant, Mois, Paiement, BankAccount, Receipt, ReceiptPayment, Utilisateur, Activity, AcademicYear, MonthlyReport, DailyAbsence, AccountCategory, Account, Permission, Suspension, AbsenceActivity, Competition, Tasfiya, Juge, EvaluationResult, EvaluationPeriod, EvaluationMonthResult, Participant, Evaluation, CompetitionLevel, EtudiantCertified, QuarterlyReport, Attestation, ExitCertificate, DeliveryReceipt
+from .models import Branche, Classe, Niveau, Agent, Receipt, SalaryPayment, ReceiptPayment, PaiementTransations, Exam, AbsElmhdara, Job, Inscription, Garant, GarantPaiement, Employee, Transaction, Etudiant, Mois, Paiement, BankAccount, Receipt, ReceiptPayment, Utilisateur, Activity, AcademicYear, MonthlyReport, DailyAbsence, AccountCategory, Account, Permission, Suspension, AbsenceActivity, Competition, Tasfiya, Juge, EvaluationResult, EvaluationPeriod, EvaluationMonthResult, Participant, Evaluation, CompetitionLevel, EtudiantCertified, QuarterlyReport, Attestation, ExitCertificate, DeliveryReceipt, DeliveryPeriod
 from .serializers import *
 from rest_framework_simplejwt.views import TokenObtainPairView
 from django.db import transaction
@@ -35,7 +35,7 @@ from rest_framework.permissions import AllowAny
 import django_filters
 from django.db import models
 
-from django.db.models import Q, F, Avg, Sum, Case, When, Count, Value, DecimalField, CharField
+from django.db.models import Q, F, Avg, Sum, Case, When, Count, Value, DecimalField, CharField, Prefetch
 from django.db.models.functions import Coalesce
 
 MONTHS_AR_REVERSE = {
@@ -352,10 +352,6 @@ class EtudiantViewSet(viewsets.ModelViewSet):
         if user.role and user.role.title == 'admin_m':
             queryset = queryset.filter(branche__in=user.branches.all())
 
-        is_residence_param = self.request.query_params.get('is_residence', None)
-        if is_residence_param is not None:
-            queryset = queryset.filter(is_residence=is_residence_param.lower() in ('true', '1'))
-
         level_id_param = self.request.query_params.get('level_id', None)
         if level_id_param:
             queryset = queryset.filter(level_id=level_id_param)
@@ -425,6 +421,20 @@ class EtudiantViewSet(viewsets.ModelViewSet):
                     remaining_amount=old_fee,
                     user=None,
                 )
+
+    def destroy(self, request, *args, **kwargs):
+        student = self.get_object()
+        has_reports      = MonthlyReport.objects.filter(student=student).exists()
+        has_transactions = Transaction.objects.filter(student=student).exists()
+        if has_reports or has_transactions:
+            reasons = []
+            if has_reports:      reasons.append('تقارير شهرية')
+            if has_transactions: reasons.append('معاملات مالية')
+            return Response(
+                {'error': f'لا يمكن حذف الطالب لوجود {" و".join(reasons)} مرتبطة به'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        return super().destroy(request, *args, **kwargs)
 
     @action(detail=False, methods=['get'], url_path='etudiants-search-custem')
     def etudiants_search_custom(self, request):
@@ -3119,13 +3129,17 @@ def student_by_level(request):
     if not level_id:
         return Response({"error": "Level is required"}, status=400)
 
-    students = Etudiant.objects.filter(
-        level_id=level_id,
-        is_inscrire=1,
-        etat='inscrit'
+    reports_qs = MonthlyReport.objects.filter(ahzab__isnull=False).exclude(ahzab='').order_by('-created_at')
+
+    students = (
+        Etudiant.objects
+        .filter(level_id=level_id, is_inscrire=1, etat='inscrit')
+        .select_related('level', 'agent')
+        .prefetch_related(Prefetch('monthlyreport_set', queryset=reports_qs, to_attr='_prefetched_reports'))
+        .only('id', 'student_name', 'part_count', 'fees', 'date_inscription', 'level_id', 'agent_id')
     )
 
-    serializer = EtudiantSerializer(students, many=True)
+    serializer = EtudiantLightSerializer(students, many=True)
     return Response(serializer.data)
 
 
@@ -3885,8 +3899,6 @@ def unpaid_students(request):
     except AcademicYear.DoesNotExist:
         return Response({"error": "année académique non trouvée"}, status=404)
 
-    is_residence_param = request.GET.get('is_residence', None)
-
     students = Etudiant.objects.filter(
         is_inscrire=1,
         payment_nature='mensuel',
@@ -3900,8 +3912,6 @@ def unpaid_students(request):
         students = students.filter(branche_id=branch_id)
     if class_id:
         students = students.filter(classe_id=class_id)
-    if is_residence_param is not None:
-        students = students.filter(is_residence=is_residence_param.lower() in ('true', '1'))
 
     result = []
     today = date.today()
@@ -4018,8 +4028,6 @@ def unpaid_students_not_have_agent(request):
         students = students.filter(branche_id=branch_id)
     if class_id:
         students = students.filter(classe_id=class_id)
-    if is_residence_param is not None:
-        students = students.filter(is_residence=is_residence_param.lower() in ('true', '1'))
 
     result = []
     today = date.today()
@@ -4126,8 +4134,6 @@ def unpaid_by_agent(request):
     except AcademicYear.DoesNotExist:
         return Response({"error": "année académique non trouvée"}, status=404)
 
-    is_residence_param = request.GET.get('is_residence', None)
-
     students = Etudiant.objects.filter(
         is_inscrire=1,
         payment_nature='mensuel',
@@ -4148,8 +4154,6 @@ def unpaid_by_agent(request):
 
     if class_id:
         students = students.filter(classe_id=class_id)
-    if is_residence_param is not None:
-        students = students.filter(is_residence=is_residence_param.lower() in ('true', '1'))
 
     agents = {}
     today = date.today()
@@ -4739,19 +4743,32 @@ def get_last_agent_receipt(request):
 # Delivery Receipt
 # ─────────────────────────────────────────────
 
+class DeliveryPeriodViewSet(viewsets.ModelViewSet):
+    queryset = DeliveryPeriod.objects.all()
+    serializer_class = DeliveryPeriodSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        qs = DeliveryPeriod.objects.all()
+        ay = self.request.query_params.get('academic_year')
+        if ay:
+            qs = qs.filter(academic_year_id=ay)
+        return qs
+
+
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def delivery_receipts_list(request):
-    """GET /delivery-receipts/?classe=&month=&academic_year="""
+    """GET /delivery-receipts/?classe=&period=&academic_year="""
     classe_id    = request.GET.get('classe')
-    month        = request.GET.get('month', '').strip()
+    period_id    = request.GET.get('period')
     academic_year_id = request.GET.get('academic_year')
 
     qs = DeliveryReceipt.objects.filter(
         classe_id=classe_id,
-        month=month,
+        period_id=period_id,
         academic_year_id=academic_year_id
-    ).select_related('student')
+    ).select_related('student', 'period')
 
     serializer = DeliveryReceiptSerializer(qs, many=True)
     return Response(serializer.data)
@@ -4763,18 +4780,18 @@ def delivery_receipts_bulk_save(request):
     """
     POST /delivery-receipts/save/
     Body: {
-      classe: int, month: str, academic_year: int,
+      classe: int, period: int, academic_year: int,
       rows: [{ student: int, reception_date: str|null, delivery_date: str|null, result: str, notes: str }]
     }
     """
     data = request.data
     classe_id        = data.get('classe')
-    month            = data.get('month', '').strip()
+    period_id        = data.get('period')
     academic_year_id = data.get('academic_year')
     rows             = data.get('rows', [])
 
-    if not classe_id or not month or not academic_year_id:
-        return Response({'detail': 'classe, month, academic_year requis'}, status=400)
+    if not classe_id or not period_id or not academic_year_id:
+        return Response({'detail': 'classe, period, academic_year requis'}, status=400)
 
     saved = []
     for row in rows:
@@ -4784,9 +4801,9 @@ def delivery_receipts_bulk_save(request):
         obj, _ = DeliveryReceipt.objects.update_or_create(
             student_id=student_id,
             classe_id=classe_id,
-            month=month,
-            academic_year_id=academic_year_id,
+            period_id=period_id,
             defaults={
+                'academic_year_id': academic_year_id,
                 'reception_date': row.get('reception_date') or None,
                 'delivery_date':  row.get('delivery_date')  or None,
                 'result':  row.get('result', ''),

@@ -202,7 +202,6 @@ class Etudiant(models.Model):
     suspension_reason = models.TextField(null=True, blank=True)
 
     current_city = models.CharField(max_length=100, null=True, blank=True)
-    is_residence = models.BooleanField(default=False)
     etat = models.CharField(
         max_length=50,
         choices=[('inscrit', 'Inscrit'), ('suspendu', 'Suspendu'), ('en_attente', 'En attente')],
@@ -1269,7 +1268,7 @@ class Attestation(models.Model):
     etudiant = models.ForeignKey(
         'Etudiant',
         on_delete=models.CASCADE,
-        blank=True, null=True, 
+        blank=True, null=True,
         related_name='attestations'
     )
 
@@ -1277,12 +1276,15 @@ class Attestation(models.Model):
     deceased = models.CharField(max_length=255, blank=True, null=True)
     elmouaza = models.CharField(max_length=255, blank=True, null=True)
     mention = models.CharField(max_length=255, blank=True, null=True)
+    type_qiraa = models.CharField(max_length=255, blank=True, null=True)
+    photo = models.ImageField(upload_to='attestations/photos/', blank=True, null=True)
 
     date_emission = models.DateField(default=timezone.now)
 
     # Optional fields
-    mention = models.CharField(max_length=255, blank=True, null=True)
     note = models.TextField(blank=True, null=True)
+
+    level = models.CharField(max_length=10, blank=True, null=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -1311,6 +1313,23 @@ class ExitCertificate(models.Model):
 
 
 
+class DeliveryPeriod(models.Model):
+    name = models.CharField(max_length=100, verbose_name='اسم الفترة')
+    academic_year = models.ForeignKey(
+        'AcademicYear', on_delete=models.SET_NULL,
+        null=True, blank=True, related_name='delivery_periods'
+    )
+    start_date = models.DateField(null=True, blank=True)
+    end_date   = models.DateField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return self.name
+
+
 class DeliveryReceipt(models.Model):
     student = models.ForeignKey(
         'Etudiant', on_delete=models.CASCADE,
@@ -1324,7 +1343,11 @@ class DeliveryReceipt(models.Model):
         'AcademicYear', on_delete=models.SET_NULL,
         null=True, blank=True, related_name='delivery_receipts'
     )
-    month = models.CharField(max_length=20, verbose_name='الشهر')
+    period = models.ForeignKey(
+        DeliveryPeriod, on_delete=models.SET_NULL,
+        null=True, blank=True, related_name='receipts', verbose_name='الفترة'
+    )
+    month = models.CharField(max_length=20, blank=True, default='', verbose_name='الشهر')
     reception_date = models.DateField(null=True, blank=True, verbose_name='تاريخ الإستلام')
     delivery_date  = models.DateField(null=True, blank=True, verbose_name='تاريخ التسليم')
     result = models.TextField(blank=True, default='', verbose_name='النتيجة')
@@ -1337,9 +1360,9 @@ class DeliveryReceipt(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        unique_together = ('student', 'classe', 'month', 'academic_year')
+        unique_together = ('student', 'classe', 'period')
         ordering = ['student__student_name']
         verbose_name = 'استمارة الإستلام والتسليم'
 
     def __str__(self):
-        return f"{self.student.student_name} - {self.month}"
+        return f"{self.student.student_name} - {self.period}"

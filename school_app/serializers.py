@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Branche, Classe, Niveau, Agent, Etudiant, Mois, Exam, Paiement, Inscription, Garant, Attestation, GarantPaiement, SalaryPayment, Employee, Job, BankAccount, Receipt, ReceiptPayment, Utilisateur, Activity, AcademicYear, MonthlyReport, DailyAbsence, AccountCategory, Account, Transaction, Permission, Suspension, AbsenceActivity, AbsElmhdara, Competition, Tasfiya, Juge, Participant, Evaluation, CompetitionLevel, PaiementTransations, EtudiantCertified, QuarterlyReport, EvaluationResult, EvaluationPeriod, EvaluationMonthResult, ExitCertificate, DeliveryReceipt
+from .models import Branche, Classe, Niveau, Agent, Etudiant, Mois, Exam, Paiement, Inscription, Garant, Attestation, GarantPaiement, SalaryPayment, Employee, Job, BankAccount, Receipt, ReceiptPayment, Utilisateur, Activity, AcademicYear, MonthlyReport, DailyAbsence, AccountCategory, Account, Transaction, Permission, Suspension, AbsenceActivity, AbsElmhdara, Competition, Tasfiya, Juge, Participant, Evaluation, CompetitionLevel, PaiementTransations, EtudiantCertified, QuarterlyReport, EvaluationResult, EvaluationPeriod, EvaluationMonthResult, ExitCertificate, DeliveryReceipt, DeliveryPeriod
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
 
@@ -157,6 +157,31 @@ class EtudiantSerializer(serializers.ModelSerializer):
                        .order_by('-created_at')
                        .first())
         return last_report.ahzab if last_report else None
+
+class EtudiantLightSerializer(serializers.ModelSerializer):
+    level_name  = serializers.CharField(source='level.level_name', read_only=True, default=None)
+    agent_name  = serializers.CharField(source='agent.agent_name', read_only=True, default=None)
+    last_ahzab  = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Etudiant
+        fields = ['id', 'student_name', 'part_count', 'fees', 'date_inscription',
+                  'level_name', 'agent_name', 'last_ahzab']
+
+    def get_last_ahzab(self, obj):
+        reports = getattr(obj, '_prefetched_reports', None)
+        if reports is not None:
+            for r in sorted(reports, key=lambda x: x.created_at, reverse=True):
+                if r.ahzab:
+                    return r.ahzab
+            return None
+        last = (MonthlyReport.objects
+                .filter(student=obj, ahzab__isnull=False)
+                .exclude(ahzab='')
+                .order_by('-created_at')
+                .first())
+        return last.ahzab if last else None
+
 
 class MoisSerializer(serializers.ModelSerializer):
     class Meta:
@@ -722,14 +747,24 @@ class ExitCertificateSerializer(serializers.ModelSerializer):
         ]
 
 
+class DeliveryPeriodSerializer(serializers.ModelSerializer):
+    academic_year_name = serializers.CharField(source='academic_year.year', read_only=True)
+
+    class Meta:
+        model = DeliveryPeriod
+        fields = ['id', 'name', 'academic_year', 'academic_year_name', 'start_date', 'end_date', 'created_at']
+        read_only_fields = ['id', 'created_at']
+
+
 class DeliveryReceiptSerializer(serializers.ModelSerializer):
     student_name = serializers.CharField(source='student.student_name', read_only=True)
+    period_name  = serializers.CharField(source='period.name', read_only=True)
 
     class Meta:
         model = DeliveryReceipt
         fields = [
             'id', 'student', 'student_name', 'classe', 'academic_year',
-            'month', 'reception_date', 'delivery_date',
+            'period', 'period_name', 'reception_date', 'delivery_date',
             'result', 'notes', 'created_at', 'updated_at'
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']

@@ -19,6 +19,7 @@ router.register(r'receipts-payment', ReceiptPaymentViewSet, basename="receipt-pa
 router.register(r'academic-years', AcademicYearViewSet, basename="academic-year")
 router.register(r'monthly-report', MonthlyReportViewSet, basename="monthly-report")
 router.register(r'evaluation-periods', EvaluationPeriodViewSet, basename="evaluation-period")
+router.register(r'delivery-periods', DeliveryPeriodViewSet, basename="delivery-period")
 router.register(r'evaluation-results', EvaluationResultViewSet, basename="evaluation-result")
 router.register(r'quarterly-report', QuarterlyReportViewSet, basename="quarterly-report")
 router.register(r'daily-absence', DailyAbsenceViewSet, basename="daily-absence")
