@@ -377,6 +377,25 @@ class QuarterlyReport(models.Model):
     def __str__(self):
         return f"{self.student.full_name} - {self.quarter} {self.year}"
 
+class StudentFixedAbsence(models.Model):
+    DAY_CHOICES = [
+        ('الأحد', 'الأحد'), ('الاثنين', 'الاثنين'), ('الثلاثاء', 'الثلاثاء'),
+        ('الأربعاء', 'الأربعاء'), ('الخميس', 'الخميس'), ('الجمعة', 'الجمعة'), ('السبت', 'السبت'),
+    ]
+    SESSION_CHOICES = [('صباحًا', 'صباحًا'), ('مساءً', 'مساءً'), ('', 'الكل')]
+
+    student = models.ForeignKey('Etudiant', on_delete=models.CASCADE, related_name='fixed_absences')
+    day     = models.CharField(max_length=20, choices=DAY_CHOICES)
+    session = models.CharField(max_length=6, choices=SESSION_CHOICES, blank=True, default='')
+    note    = models.TextField(blank=True, null=True)
+
+    class Meta:
+        unique_together = ['student', 'day', 'session']
+
+    def __str__(self):
+        return f"{self.student.student_name} — {self.day} {self.session or '(الكل)'}"
+
+
 class DailyAbsence(models.Model):
     SESSION_CHOICES = [
         ('صباحًا', 'صباحًا'),

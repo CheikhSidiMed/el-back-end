@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Branche, Classe, Niveau, Agent, Etudiant, Mois, Exam, Paiement, Inscription, Garant, Attestation, GarantPaiement, SalaryPayment, Employee, Job, BankAccount, Receipt, ReceiptPayment, Utilisateur, Activity, AcademicYear, MonthlyReport, DailyAbsence, AccountCategory, Account, Transaction, Permission, Suspension, AbsenceActivity, AbsElmhdara, Competition, Tasfiya, Juge, Participant, Evaluation, CompetitionLevel, PaiementTransations, EtudiantCertified, QuarterlyReport, EvaluationResult, EvaluationPeriod, EvaluationMonthResult, ExitCertificate, DeliveryReceipt, DeliveryPeriod
+from .models import Branche, Classe, Niveau, Agent, Etudiant, Mois, Exam, Paiement, Inscription, Garant, Attestation, GarantPaiement, SalaryPayment, Employee, Job, BankAccount, Receipt, ReceiptPayment, Utilisateur, Activity, AcademicYear, MonthlyReport, DailyAbsence, StudentFixedAbsence, AccountCategory, Account, Transaction, Permission, Suspension, AbsenceActivity, AbsElmhdara, Competition, Tasfiya, Juge, Participant, Evaluation, CompetitionLevel, PaiementTransations, EtudiantCertified, QuarterlyReport, EvaluationResult, EvaluationPeriod, EvaluationMonthResult, ExitCertificate, DeliveryReceipt, DeliveryPeriod
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
 
@@ -236,10 +236,35 @@ class QuarterlyReportSerializer(serializers.ModelSerializer):
         model = QuarterlyReport
         fields = '__all__'
 
+class StudentFixedAbsenceSerializer(serializers.ModelSerializer):
+    student_name = serializers.CharField(source='student.student_name', read_only=True)
+    classe_nom   = serializers.CharField(source='student.classe.nom', read_only=True, default=None)
+
+    class Meta:
+        model = StudentFixedAbsence
+        fields = ['id', 'student', 'student_name', 'classe_nom', 'day', 'session', 'note']
+
+
 class DailyAbsenceSerializer(serializers.ModelSerializer):
     class Meta:
         model = DailyAbsence
         fields = '__all__'
+
+class DailyAbsenceDetailSerializer(serializers.ModelSerializer):
+    student_name  = serializers.CharField(source='student.student_name', read_only=True)
+    classe_nom    = serializers.CharField(source='student.classe.nom', read_only=True, default=None)
+    branche_nom   = serializers.CharField(source='student.branche.nom', read_only=True, default=None)
+    agent_phone   = serializers.SerializerMethodField()
+
+    class Meta:
+        model = DailyAbsence
+        fields = ['id', 'student', 'student_name', 'classe_nom', 'branche_nom',
+                  'agent_phone', 'date', 'session', 'justified_absence', 'remark', 'currentYear']
+
+    def get_agent_phone(self, obj):
+        if obj.student and obj.student.agent:
+            return obj.student.agent.whatsapp_phone
+        return None
 
 class BankAccountSerializer(serializers.ModelSerializer):
     class Meta:

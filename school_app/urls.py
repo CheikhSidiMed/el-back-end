@@ -23,6 +23,7 @@ router.register(r'delivery-periods', DeliveryPeriodViewSet, basename="delivery-p
 router.register(r'evaluation-results', EvaluationResultViewSet, basename="evaluation-result")
 router.register(r'quarterly-report', QuarterlyReportViewSet, basename="quarterly-report")
 router.register(r'daily-absence', DailyAbsenceViewSet, basename="daily-absence")
+router.register(r'student-fixed-absence', StudentFixedAbsenceViewSet, basename="student-fixed-absence")
 
 router.register(r'accounts', AccountViewSet, basename="account")
 router.register(r'account-categorys', AccountCategoryViewSet, basename="account-category")

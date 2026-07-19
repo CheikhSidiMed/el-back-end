@@ -1,7 +1,7 @@
 from django.shortcuts import render
 from rest_framework import viewsets
 from rest_framework.response import Response
-from .models import Branche, Classe, Niveau, Agent, Receipt, SalaryPayment, ReceiptPayment, PaiementTransations, Exam, AbsElmhdara, Job, Inscription, Garant, GarantPaiement, Employee, Transaction, Etudiant, Mois, Paiement, BankAccount, Receipt, ReceiptPayment, Utilisateur, Activity, AcademicYear, MonthlyReport, DailyAbsence, AccountCategory, Account, Permission, Suspension, AbsenceActivity, Competition, Tasfiya, Juge, EvaluationResult, EvaluationPeriod, EvaluationMonthResult, Participant, Evaluation, CompetitionLevel, EtudiantCertified, QuarterlyReport, Attestation, ExitCertificate, DeliveryReceipt, DeliveryPeriod
+from .models import Branche, Classe, Niveau, Agent, Receipt, SalaryPayment, ReceiptPayment, PaiementTransations, Exam, AbsElmhdara, Job, Inscription, Garant, GarantPaiement, Employee, Transaction, Etudiant, Mois, Paiement, BankAccount, Receipt, ReceiptPayment, Utilisateur, Activity, AcademicYear, MonthlyReport, DailyAbsence, StudentFixedAbsence, AccountCategory, Account, Permission, Suspension, AbsenceActivity, Competition, Tasfiya, Juge, EvaluationResult, EvaluationPeriod, EvaluationMonthResult, Participant, Evaluation, CompetitionLevel, EtudiantCertified, QuarterlyReport, Attestation, ExitCertificate, DeliveryReceipt, DeliveryPeriod
 from .serializers import *
 from rest_framework_simplejwt.views import TokenObtainPairView
 from django.db import transaction
@@ -1348,8 +1348,33 @@ class ActivityViewSet(viewsets.ModelViewSet):
         )
 
 class DailyAbsenceViewSet(viewsets.ModelViewSet):
-    queryset = DailyAbsence.objects.all()
-    serializer_class = DailyAbsenceSerializer
+    queryset = DailyAbsence.objects.select_related('student', 'student__classe', 'student__branche', 'student__agent').all()
+    filter_backends = [DjangoFilterBackend]
+    filterset_fields = {
+        'date': ['exact'],
+        'session': ['exact'],
+        'justified_absence': ['exact'],
+        'student': ['exact'],
+        'student__classe': ['exact'],
+        'student__branche': ['exact'],
+    }
+
+    def get_serializer_class(self):
+        if self.action in ('list', 'retrieve'):
+            return DailyAbsenceDetailSerializer
+        return DailyAbsenceSerializer
+
+
+class StudentFixedAbsenceViewSet(viewsets.ModelViewSet):
+    queryset = StudentFixedAbsence.objects.select_related('student', 'student__classe').all()
+    serializer_class = StudentFixedAbsenceSerializer
+    filter_backends = [DjangoFilterBackend]
+    filterset_fields = {
+        'student': ['exact'],
+        'day': ['exact'],
+        'session': ['exact'],
+        'student__classe': ['exact'],
+    }
 
 class SuspensionViewSet(viewsets.ModelViewSet):
     queryset = Suspension.objects.all()
