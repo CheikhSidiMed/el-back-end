@@ -189,3 +189,8 @@ APPEND_SLASH = False
 
 CORS_ORIGIN_ALLOW_ALL = True
 CORS_ALLOW_ALL_HEADERS=True
+
+# ─── Web Push / VAPID ────────────────────────────────────────────────────────
+VAPID_PRIVATE_KEY = '1qbetH9lGAGRVY7FEhKEWPWiNJZxaDJpqEKdPjnSw-E'
+VAPID_PUBLIC_KEY  = 'BGc-2eEVAL0RBu2TfKC-z4_B7NC-moYR9knfH1UgSgSHg-dXCgqLj-GeLRn0045lw5YgTeE-sqptGf_Ndp9iQmg'
+VAPID_CLAIMS      = {'sub': 'mailto:admin@elmanara.com'}

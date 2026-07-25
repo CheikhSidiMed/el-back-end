@@ -160,6 +160,17 @@ class Agent(models.Model):
     def __str__(self):
         return self.agent_name
 
+class PushSubscription(models.Model):
+    agent = models.ForeignKey(Agent, on_delete=models.CASCADE, related_name='push_subscriptions')
+    endpoint = models.TextField(unique=True)
+    p256dh = models.TextField()
+    auth = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.agent.agent_name} — push"
+
+
 class Etudiant(models.Model):
     student_name = models.CharField(max_length=100)
     part_count = models.PositiveIntegerField(default=1)

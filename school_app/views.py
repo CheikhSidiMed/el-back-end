@@ -1,7 +1,7 @@
 from django.shortcuts import render
 from rest_framework import viewsets
 from rest_framework.response import Response
-from .models import Branche, Classe, Niveau, Agent, Receipt, SalaryPayment, ReceiptPayment, PaiementTransations, Exam, AbsElmhdara, Job, Inscription, Garant, GarantPaiement, Employee, Transaction, Etudiant, Mois, Paiement, BankAccount, Receipt, ReceiptPayment, Utilisateur, Activity, AcademicYear, MonthlyReport, DailyAbsence, StudentFixedAbsence, AccountCategory, Account, Permission, Suspension, AbsenceActivity, Competition, Tasfiya, Juge, EvaluationResult, EvaluationPeriod, EvaluationMonthResult, Participant, Evaluation, CompetitionLevel, EtudiantCertified, QuarterlyReport, Attestation, ExitCertificate, DeliveryReceipt, DeliveryPeriod
+from .models import Branche, Classe, Niveau, Agent, Receipt, SalaryPayment, ReceiptPayment, PaiementTransations, Exam, AbsElmhdara, Job, Inscription, Garant, GarantPaiement, Employee, Transaction, Etudiant, Mois, Paiement, BankAccount, Receipt, ReceiptPayment, Utilisateur, Activity, AcademicYear, MonthlyReport, DailyAbsence, StudentFixedAbsence, AccountCategory, Account, Permission, Suspension, AbsenceActivity, Competition, Tasfiya, Juge, EvaluationResult, EvaluationPeriod, EvaluationMonthResult, Participant, Evaluation, CompetitionLevel, EtudiantCertified, QuarterlyReport, Attestation, ExitCertificate, DeliveryReceipt, DeliveryPeriod, PushSubscription
 from .serializers import *
 from rest_framework_simplejwt.views import TokenObtainPairView
 from django.db import transaction
@@ -25,8 +25,9 @@ from decimal import Decimal
 from rest_framework import status
 
 from django.dispatch import receiver
-
 from django.db.models.signals import post_save, pre_save, post_delete
+from django.conf import settings
+import json, threading
 from .pagination import EtudiantPagination
 from rest_framework import filters
 from django.db import transaction as db_transaction
@@ -1364,6 +1365,18 @@ class DailyAbsenceViewSet(viewsets.ModelViewSet):
             return DailyAbsenceDetailSerializer
         return DailyAbsenceSerializer
 
+    def perform_create(self, serializer):
+        absence = serializer.save()
+        student = absence.student
+        if student and getattr(student, 'agent', None):
+            session_label = 'صباحًا' if absence.session == 'صباحًا' else 'مساءً'
+            date_str = absence.date.strftime('%Y-%m-%d')
+            send_push_to_agent(student.agent, {
+                'title': '🔔 غياب جديد',
+                'body': f'الطالب {student.student_name} غائب {session_label} — {date_str}',
+                'url': '/#/agent-portal/absences',
+            })
+
 
 class StudentFixedAbsenceViewSet(viewsets.ModelViewSet):
     queryset = StudentFixedAbsence.objects.select_related('student', 'student__classe').all()
@@ -1545,7 +1558,12 @@ class EmployeeViewSet(viewsets.ModelViewSet):
         current_month_salary = Decimal("0.00")
         if not month_paid:
             days_in_month = 30
-            worked_days = dismiss_date.day
+            # If the employee was hired this same month, count from their start day
+            sub = employee.subscription_date
+            if sub and sub.month == dismiss_date.month and sub.year == dismiss_date.year:
+                worked_days = max(dismiss_date.day - sub.day, 0)
+            else:
+                worked_days = dismiss_date.day
             prorata = Decimal(worked_days) / Decimal(days_in_month)
             current_month_salary = (employee.salary or Decimal("0.00")) * prorata
 
@@ -2689,6 +2707,56 @@ class EvaluationViewSet(viewsets.ModelViewSet):
 
         return queryset
 
+# ─── Web Push helpers ────────────────────────────────────────────────────────
+
+def _send_push(sub, payload: dict):
+    """Send a single push notification. Called in a background thread."""
+    try:
+        from pywebpush import webpush, WebPushException
+        webpush(
+            subscription_info={
+                'endpoint': sub.endpoint,
+                'keys': {'p256dh': sub.p256dh, 'auth': sub.auth}
+            },
+            data=json.dumps(payload),
+            vapid_private_key=settings.VAPID_PRIVATE_KEY,
+            vapid_claims=settings.VAPID_CLAIMS,
+        )
+    except Exception as exc:
+        # 410 Gone = subscription expired, remove it
+        if hasattr(exc, 'response') and exc.response and exc.response.status_code == 410:
+            sub.delete()
+
+
+def send_push_to_agent(agent, payload: dict):
+    """Fire push notifications to all of an agent's subscriptions (non-blocking)."""
+    subscriptions = list(PushSubscription.objects.filter(agent=agent))
+    for sub in subscriptions:
+        threading.Thread(target=_send_push, args=(sub, payload), daemon=True).start()
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def push_subscribe(request):
+    agent = getattr(request.user, 'agent_profile', None)
+    if not agent:
+        return Response({'detail': 'Not an agent.'}, status=403)
+    data = request.data
+    PushSubscription.objects.update_or_create(
+        endpoint=data['endpoint'],
+        defaults={'agent': agent, 'p256dh': data['p256dh'], 'auth': data['auth']}
+    )
+    return Response({'status': 'subscribed'})
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def push_unsubscribe(request):
+    endpoint = request.data.get('endpoint', '')
+    PushSubscription.objects.filter(endpoint=endpoint).delete()
+    return Response({'status': 'unsubscribed'})
+
+
 class AgentPortalViewSet(viewsets.ViewSet):
     """Read-only portal for agents — sees only their own students."""
     permission_classes = [IsAuthenticated]
@@ -2751,9 +2819,11 @@ class AgentPortalViewSet(viewsets.ViewSet):
                 'student_name': s.student_name,
                 'gender': s.gender,
                 'classe': s.classe.nom if s.classe else '',
+                'classe_id': s.classe.id if s.classe else None,
                 'level': s.level.level_name if s.level else '',
                 'branche': s.branche.nom if s.branche else '',
-                'etat': s.payment_nature,
+                'etat': s.etat,
+                'suspension_reason': s.suspension_reason or '',
                 'fees': float(s.fees),
                 'remaining': float(s.remaining),
             })
@@ -2772,11 +2842,132 @@ class AgentPortalViewSet(viewsets.ViewSet):
         except Etudiant.DoesNotExist:
             return Response({'detail': 'Not found.'}, status=404)
 
-        payments = Paiement.objects.filter(etudiant=student).select_related(
+        # Get all academic years that have at least one payment for this student
+        all_payments = Paiement.objects.filter(etudiant=student).select_related(
             'academic_year'
-        ).order_by('academic_year__year', 'month')
+        ).order_by('academic_year__start_date', 'month')
+
+        academic_years = {}
+        for p in all_payments:
+            ay = p.academic_year
+            if ay and ay.id not in academic_years:
+                academic_years[ay.id] = {'obj': ay, 'payments': {}}
+            if ay:
+                academic_years[ay.id]['payments'][p.month] = p
+
+        reg_date = student.date_inscription
+        suspend_date = (
+            student.date_desectivation
+            if hasattr(student, 'date_desectivation') and student.etat == 'suspendu'
+            else None
+        )
+        # student.remaining = fees - discount = net monthly fee (same as /payment page's month_fee)
+        month_fee = Decimal(str(student.remaining)) if student.remaining else Decimal('0')
+
+        payment_years = []
+        for ay_id, ay_data in sorted(academic_years.items(), key=lambda x: x[1]['obj'].start_date):
+            ay = ay_data['obj']
+            pay_dict = ay_data['payments']
+            start_month = ay.start_date.month
+
+            months_data = []
+            for month in range(1, 13):
+                p = pay_dict.get(month)
+                # Determine calendar year for this month inside the academic year
+                cal_year = ay.start_date.year if month >= start_month else ay.start_date.year + 1
+
+                # After suspension → free
+                if suspend_date:
+                    if (cal_year > suspend_date.year) or \
+                       (cal_year == suspend_date.year and month > suspend_date.month):
+                        months_data.append({
+                            'month': month,
+                            'month_name_ar': ARABIC_MONTHS[month - 1],
+                            'status': 'paid',
+                            'due_amount': 0.0,
+                            'paid_amount': 0.0,
+                            'remaining_amount': 0.0,
+                        })
+                        continue
+
+                if p:
+                    # Actual payment record exists
+                    status = 'paid' if p.remaining_amount == 0 else (
+                        'partial' if p.paid_amount > 0 else 'unpaid'
+                    )
+                    months_data.append({
+                        'month': month,
+                        'calendar_year': cal_year,
+                        'month_name_ar': ARABIC_MONTHS[month - 1],
+                        'status': status,
+                        'due_amount': float(p.due_amount),
+                        'paid_amount': float(p.paid_amount),
+                        'remaining_amount': float(p.remaining_amount),
+                        'payment_date': str(p.payment_date) if p.payment_date else None,
+                    })
+                else:
+                    # No payment record — determine if month is before registration (free)
+                    if reg_date and (
+                        cal_year < reg_date.year or
+                        (cal_year == reg_date.year and month < reg_date.month)
+                    ):
+                        months_data.append({
+                            'month': month,
+                            'calendar_year': cal_year,
+                            'month_name_ar': ARABIC_MONTHS[month - 1],
+                            'status': 'paid',
+                            'due_amount': 0.0,
+                            'paid_amount': 0.0,
+                            'remaining_amount': 0.0,
+                        })
+                    else:
+                        months_data.append({
+                            'month': month,
+                            'calendar_year': cal_year,
+                            'month_name_ar': ARABIC_MONTHS[month - 1],
+                            'status': 'unpaid',
+                            'due_amount': float(month_fee),
+                            'paid_amount': 0.0,
+                            'remaining_amount': float(month_fee),
+                        })
+
+            payment_years.append({
+                'year_id': ay.id,
+                'year': ay.year,
+                'months': months_data,
+            })
 
         absences = DailyAbsence.objects.filter(student=student).order_by('-date')[:50]
+
+        # paid_total = all money actually received
+        paid_total = float(all_payments.aggregate(s=Sum('paid_amount'))['s'] or 0)
+
+        # debt = remaining on actual records (past unpaid/partial months)
+        # + virtual months with no record whose calendar date has already passed
+        today = date.today()
+        debt = float(all_payments.aggregate(s=Sum('remaining_amount'))['s'] or 0)
+        for ay_data in academic_years.values():
+            ay = ay_data['obj']
+            for month in range(1, 13):
+                if month in ay_data['payments']:
+                    continue  # already in debt via remaining_amount above
+                cal_year = ay.start_date.year if month >= ay.start_date.month else ay.start_date.year + 1
+                month_date = date(cal_year, month, 1)
+                if month_date > today:
+                    continue  # future month — not yet a debt
+                # Check registration / suspension
+                if reg_date and (
+                    cal_year < reg_date.year or
+                    (cal_year == reg_date.year and month < reg_date.month)
+                ):
+                    continue  # before registration — free
+                if suspend_date and (
+                    cal_year > suspend_date.year or
+                    (cal_year == suspend_date.year and month > suspend_date.month)
+                ):
+                    continue  # after suspension — free
+                debt += float(month_fee)
+        remaining_total = debt
 
         return Response({
             'id': student.id,
@@ -2791,18 +2982,9 @@ class AgentPortalViewSet(viewsets.ViewSet):
             'remaining': float(student.remaining),
             'payment_nature': student.payment_nature,
             'date_inscription': str(student.date_inscription),
-            'payments': [
-                {
-                    'id': p.id,
-                    'month': p.month,
-                    'academic_year': p.academic_year.year if p.academic_year else '',
-                    'due_amount': float(p.due_amount),
-                    'paid_amount': float(p.paid_amount),
-                    'remaining_amount': float(p.remaining_amount),
-                    'payment_date': str(p.payment_date),
-                }
-                for p in payments
-            ],
+            'payment_years': payment_years,
+            'paid_total': paid_total,
+            'remaining_total': remaining_total,
             'absences': [
                 {
                     'id': a.id,
@@ -2830,6 +3012,61 @@ class AgentPortalViewSet(viewsets.ViewSet):
             'profession': agent.profession,
             'user_first_name': request.user.first_name or '',
         })
+
+    @action(detail=False, methods=['get'], url_path='notifications')
+    def notifications(self, request):
+        agent = self._get_agent(request)
+        if not agent:
+            return Response({'detail': 'Not an agent account.'}, status=403)
+
+        since = timezone.localdate() - timezone.timedelta(days=30)
+        students = Etudiant.objects.filter(agent=agent, is_inscrire=1).select_related('classe', 'level')
+        student_ids = [s.id for s in students]
+        student_map = {s.id: s for s in students}
+
+        # Absences last 30 days
+        absences = (
+            DailyAbsence.objects
+            .filter(student_id__in=student_ids, date__gte=since)
+            .select_related('student')
+            .order_by('-date', '-id')[:30]
+        )
+
+        data = []
+        for a in absences:
+            data.append({
+                'type': 'absence',
+                'id': a.id,
+                'student_name': a.student.student_name,
+                'gender': a.student.gender,
+                'date': a.date.strftime('%Y-%m-%d'),
+                'session': a.session,
+                'justified': a.justified_absence,
+                'remark': a.remark or '',
+            })
+
+        # Suspended students (suspended in last 30 days)
+        suspended = [
+            s for s in students
+            if s.etat == 'suspendu'
+            and s.date_desectivation
+            and s.date_desectivation >= since
+        ]
+        for s in suspended:
+            data.append({
+                'type': 'suspension',
+                'id': f'susp-{s.id}',
+                'student_name': s.student_name,
+                'gender': s.gender,
+                'date': s.date_desectivation.strftime('%Y-%m-%d'),
+                'session': '',
+                'justified': False,
+                'remark': s.suspension_reason or '',
+            })
+
+        # Sort all by date desc
+        data.sort(key=lambda x: x['date'], reverse=True)
+        return Response(data)
 
 
 class AttestationViewSet(viewsets.ModelViewSet):

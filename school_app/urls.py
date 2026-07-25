@@ -99,6 +99,6 @@ urlpatterns = [
     path('get-last-agent-receipt/', get_last_agent_receipt, name='get-last-agent-receipts'),
     path('delivery-receipts/', delivery_receipts_list, name='delivery-receipts-list'),
     path('delivery-receipts/save/', delivery_receipts_bulk_save, name='delivery-receipts-save'),
-
-
+    path('api/push/subscribe/', push_subscribe, name='push-subscribe'),
+    path('api/push/unsubscribe/', push_unsubscribe, name='push-unsubscribe'),
 ]
