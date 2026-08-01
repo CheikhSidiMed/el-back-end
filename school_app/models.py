@@ -292,6 +292,7 @@ class AcademicYear(models.Model):
     name        = models.CharField(max_length=9, default='2025', help_text="2025")
     start_date  = models.DateField()
     end_date    = models.DateField()
+    is_active   = models.BooleanField(default=False, verbose_name='السنة النشطة')
 
     class Meta:
         ordering            = ("-start_date",)
@@ -1396,3 +1397,24 @@ class DeliveryReceipt(models.Model):
 
     def __str__(self):
         return f"{self.student.student_name} - {self.period}"
+
+
+class TehejiReport(models.Model):
+    student = models.ForeignKey(Etudiant, on_delete=models.CASCADE, related_name='teheji_reports')
+    month   = models.CharField(max_length=20, verbose_name='الشهر')
+    year    = models.CharField(max_length=10, verbose_name='العام الدراسي')
+    louh       = models.CharField(max_length=100, blank=True, default='', verbose_name='اللوح')
+    mahfouzat  = models.CharField(max_length=100, blank=True, default='', verbose_name='المحفوظات')
+    ketaba     = models.CharField(max_length=100, blank=True, default='', verbose_name='الكتابة والقراءة')
+    taqdir     = models.CharField(max_length=100, blank=True, default='', verbose_name='التقدير')
+    notes      = models.TextField(blank=True, default='', verbose_name='الملاحظات')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ['student', 'month', 'year']
+        ordering = ['student__student_name']
+        verbose_name = 'استمارة التهجي'
+
+    def __str__(self):
+        return f"{self.student.student_name} - {self.month} {self.year}"

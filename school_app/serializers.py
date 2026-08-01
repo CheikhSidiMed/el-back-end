@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Branche, Classe, Niveau, Agent, Etudiant, Mois, Exam, Paiement, Inscription, Garant, Attestation, GarantPaiement, SalaryPayment, Employee, Job, BankAccount, Receipt, ReceiptPayment, Utilisateur, Activity, AcademicYear, MonthlyReport, DailyAbsence, StudentFixedAbsence, AccountCategory, Account, Transaction, Permission, Suspension, AbsenceActivity, AbsElmhdara, Competition, Tasfiya, Juge, Participant, Evaluation, CompetitionLevel, PaiementTransations, EtudiantCertified, QuarterlyReport, EvaluationResult, EvaluationPeriod, EvaluationMonthResult, ExitCertificate, DeliveryReceipt, DeliveryPeriod
+from .models import Branche, Classe, Niveau, Agent, Etudiant, Mois, Exam, Paiement, Inscription, Garant, Attestation, GarantPaiement, SalaryPayment, Employee, Job, BankAccount, Receipt, ReceiptPayment, Utilisateur, Activity, AcademicYear, MonthlyReport, DailyAbsence, StudentFixedAbsence, AccountCategory, Account, Transaction, Permission, Suspension, AbsenceActivity, AbsElmhdara, Competition, Tasfiya, Juge, Participant, Evaluation, CompetitionLevel, PaiementTransations, EtudiantCertified, QuarterlyReport, EvaluationResult, EvaluationPeriod, EvaluationMonthResult, ExitCertificate, DeliveryReceipt, DeliveryPeriod, TehejiReport
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
 
@@ -218,6 +218,7 @@ class EvaluationPeriodSerializer(serializers.ModelSerializer):
 class EvaluationResultSerializer(serializers.ModelSerializer):
     period_name  = serializers.CharField(source='period.name', read_only=True)
     student_name = serializers.CharField(source='student.student_name', read_only=True)
+    student_etat = serializers.CharField(source='student.etat', read_only=True)
 
     class Meta:
         model = EvaluationResult
@@ -226,6 +227,7 @@ class EvaluationResultSerializer(serializers.ModelSerializer):
 class EvaluationMonthResultSerializer(serializers.ModelSerializer):
     period_name  = serializers.CharField(source='period.name', read_only=True)
     student_name = serializers.CharField(source='student.student_name', read_only=True)
+    student_etat = serializers.CharField(source='student.etat', read_only=True)
 
     class Meta:
         model = EvaluationMonthResult
@@ -246,6 +248,9 @@ class StudentFixedAbsenceSerializer(serializers.ModelSerializer):
 
 
 class DailyAbsenceSerializer(serializers.ModelSerializer):
+    student_name = serializers.CharField(source='student.student_name', read_only=True)
+    student_etat = serializers.CharField(source='student.etat', read_only=True)
+
     class Meta:
         model = DailyAbsence
         fields = '__all__'
@@ -783,13 +788,23 @@ class DeliveryPeriodSerializer(serializers.ModelSerializer):
 
 class DeliveryReceiptSerializer(serializers.ModelSerializer):
     student_name = serializers.CharField(source='student.student_name', read_only=True)
+    student_etat = serializers.CharField(source='student.etat', read_only=True)
     period_name  = serializers.CharField(source='period.name', read_only=True)
 
     class Meta:
         model = DeliveryReceipt
         fields = [
-            'id', 'student', 'student_name', 'classe', 'academic_year',
+            'id', 'student', 'student_name', 'student_etat', 'classe', 'academic_year',
             'period', 'period_name', 'reception_date', 'delivery_date',
             'result', 'notes', 'created_at', 'updated_at'
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
+
+
+class TehejiReportSerializer(serializers.ModelSerializer):
+    student_name = serializers.CharField(source='student.student_name', read_only=True)
+    student_etat = serializers.CharField(source='student.etat', read_only=True)
+
+    class Meta:
+        model = TehejiReport
+        fields = '__all__'

@@ -1,7 +1,7 @@
 from django.shortcuts import render
 from rest_framework import viewsets
 from rest_framework.response import Response
-from .models import Branche, Classe, Niveau, Agent, Receipt, SalaryPayment, ReceiptPayment, PaiementTransations, Exam, AbsElmhdara, Job, Inscription, Garant, GarantPaiement, Employee, Transaction, Etudiant, Mois, Paiement, BankAccount, Receipt, ReceiptPayment, Utilisateur, Activity, AcademicYear, MonthlyReport, DailyAbsence, StudentFixedAbsence, AccountCategory, Account, Permission, Suspension, AbsenceActivity, Competition, Tasfiya, Juge, EvaluationResult, EvaluationPeriod, EvaluationMonthResult, Participant, Evaluation, CompetitionLevel, EtudiantCertified, QuarterlyReport, Attestation, ExitCertificate, DeliveryReceipt, DeliveryPeriod, PushSubscription
+from .models import Branche, Classe, Niveau, Agent, Receipt, SalaryPayment, ReceiptPayment, PaiementTransations, Exam, AbsElmhdara, Job, Inscription, Garant, GarantPaiement, Employee, Transaction, Etudiant, Mois, Paiement, BankAccount, Receipt, ReceiptPayment, Utilisateur, Activity, AcademicYear, MonthlyReport, DailyAbsence, StudentFixedAbsence, AccountCategory, Account, Permission, Suspension, AbsenceActivity, Competition, Tasfiya, Juge, EvaluationResult, EvaluationPeriod, EvaluationMonthResult, Participant, Evaluation, CompetitionLevel, EtudiantCertified, QuarterlyReport, Attestation, ExitCertificate, DeliveryReceipt, DeliveryPeriod, PushSubscription, TehejiReport
 from .serializers import *
 from rest_framework_simplejwt.views import TokenObtainPairView
 from django.db import transaction
@@ -1841,6 +1841,10 @@ class MonthlyReportViewSet(viewsets.ModelViewSet):
             # -------- ABSENCE --------
             item['absence'] = absence_map.get(report.student_id, 0)
 
+            # -------- STUDENT INFO (for suspended students) --------
+            item['student_name'] = report.student.student_name
+            item['student_etat'] = report.student.etat
+
             data.append(item)
 
         return Response(data)
@@ -2228,7 +2232,8 @@ class QuarterlyReportViewSet(viewsets.ModelViewSet):
 
             data.append({
                 "student": student.id,
-                "student_name": student.full_name,
+                "student_name": student.student_name,
+                "student_etat": student.etat,
 
                 # MONTHS
                 "month_1_income": format_progress(month_values[0]["ahzab"], month_values[0]["thmn"]),
@@ -2345,6 +2350,24 @@ class AcademicYearViewSet(viewsets.ModelViewSet):
     queryset         = AcademicYear.objects.all()
     serializer_class = AcademicYearSerializer
     lookup_field     = "id"
+
+    def destroy(self, request, *args, **kwargs):
+        year = self.get_object()
+        if Paiement.objects.filter(academic_year=year).exists():
+            return Response(
+                {'detail': 'لا يمكن حذف هذه السنة لأنها تحتوي على تسجيلات (مدفوعات).'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        return super().destroy(request, *args, **kwargs)
+
+    @action(detail=True, methods=['post'], url_path='activate')
+    def activate(self, request, id=None):
+        with transaction.atomic():
+            AcademicYear.objects.all().update(is_active=False)
+            year = self.get_object()
+            year.is_active = True
+            year.save()
+        return Response(AcademicYearSerializer(year).data)
 
 class RegisterUserView(generics.CreateAPIView):
     serializer_class = UtilisateurRegisterSerializer
@@ -5076,3 +5099,56 @@ def delivery_receipts_bulk_save(request):
         saved.append(obj.id)
 
     return Response({'saved': len(saved)}, status=200)
+
+
+class TehejiReportViewSet(viewsets.ModelViewSet):
+    queryset = TehejiReport.objects.select_related('student').all()
+    serializer_class = TehejiReportSerializer
+
+    @action(detail=False, methods=['get'], url_path='bulk-get')
+    def bulk_get(self, request):
+        classe_id = request.query_params.get('classe')
+        month = request.query_params.get('month')
+        year = request.query_params.get('year')
+
+        qs = TehejiReport.objects.filter(
+            student__classe_id=classe_id,
+            month=month,
+            year=year
+        ).select_related('student')
+
+        data = []
+        for r in qs:
+            data.append({
+                'id': r.id,
+                'student': r.student_id,
+                'student_name': r.student.student_name,
+                'student_etat': r.student.etat,
+                'month': r.month,
+                'year': r.year,
+                'louh': r.louh,
+                'mahfouzat': r.mahfouzat,
+                'ketaba': r.ketaba,
+                'taqdir': r.taqdir,
+                'notes': r.notes,
+            })
+        return Response(data)
+
+    @action(detail=False, methods=['post'], url_path='bulk-save')
+    def bulk_save(self, request):
+        records = request.data
+        with transaction.atomic():
+            for item in records:
+                TehejiReport.objects.update_or_create(
+                    student_id=item['student'],
+                    month=item['month'],
+                    year=item['year'],
+                    defaults={
+                        'louh': item.get('louh', ''),
+                        'mahfouzat': item.get('mahfouzat', ''),
+                        'ketaba': item.get('ketaba', ''),
+                        'taqdir': item.get('taqdir', ''),
+                        'notes': item.get('notes', ''),
+                    }
+                )
+        return Response({'saved': len(records)})
