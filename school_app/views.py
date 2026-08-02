@@ -1,7 +1,7 @@
 from django.shortcuts import render
 from rest_framework import viewsets
 from rest_framework.response import Response
-from .models import Branche, Classe, Niveau, Agent, Receipt, SalaryPayment, ReceiptPayment, PaiementTransations, Exam, AbsElmhdara, Job, Inscription, Garant, GarantPaiement, Employee, Transaction, Etudiant, Mois, Paiement, BankAccount, Receipt, ReceiptPayment, Utilisateur, Activity, AcademicYear, MonthlyReport, DailyAbsence, StudentFixedAbsence, AccountCategory, Account, Permission, Suspension, AbsenceActivity, Competition, Tasfiya, Juge, EvaluationResult, EvaluationPeriod, EvaluationMonthResult, Participant, Evaluation, CompetitionLevel, EtudiantCertified, QuarterlyReport, Attestation, ExitCertificate, DeliveryReceipt, DeliveryPeriod, PushSubscription, TehejiReport
+from .models import Branche, Classe, Niveau, Agent, Receipt, SalaryPayment, ReceiptPayment, PaiementTransations, Exam, AbsElmhdara, Job, Inscription, Garant, GarantPaiement, Employee, Transaction, Etudiant, Mois, Paiement, BankAccount, Receipt, ReceiptPayment, Utilisateur, Activity, AcademicYear, MonthlyReport, DailyAbsence, StudentFixedAbsence, AccountCategory, Account, Permission, Suspension, AbsenceActivity, Competition, Tasfiya, Juge, EvaluationResult, EvaluationPeriod, EvaluationMonthResult, Participant, Evaluation, CompetitionLevel, EtudiantCertified, QuarterlyReport, Attestation, ExitCertificate, DeliveryReceipt, DeliveryPeriod, PushSubscription, TehejiReport, StudentClassHistory
 from .serializers import *
 from rest_framework_simplejwt.views import TokenObtainPairView
 from django.db import transaction
@@ -334,22 +334,23 @@ class EtudiantViewSet(viewsets.ModelViewSet):
     pagination_class = EtudiantPagination
     filter_backends = [DjangoFilterBackend, filters.SearchFilter]
     search_fields = ['student_name', 'id', 'phone', 'agent__agent_name', 'agent__phone', 'agent__phone_2', 'agent__whatsapp_phone', 'classe__nom', 'branche__nom' ]
-    filterset_fields = ['agent_id', 'payment_nature', 'branche_id', 'classe_id', 'etat', 'classe']
+    filterset_fields = ['agent_id', 'payment_nature', 'branche_id', 'etat']
 
     def get_queryset(self):
+        from django.db.models import Subquery, OuterRef
+        from datetime import date as date_type
+
         queryset = Etudiant.objects.all()
         inscrire_param = self.request.query_params.get('inscrire', None)
 
         if inscrire_param == 'all':
-            pass  # no filter — include all students regardless of is_inscrire
+            pass
         elif inscrire_param is None or inscrire_param == '1':
             queryset = queryset.filter(is_inscrire=1)
         elif inscrire_param == '0':
             queryset = queryset.filter(is_inscrire=0)
 
         user = self.request.user
-
-        # admin général → كل الفروع
         if user.role and user.role.title == 'admin_m':
             queryset = queryset.filter(branche__in=user.branches.all())
 
@@ -361,6 +362,32 @@ class EtudiantViewSet(viewsets.ModelViewSet):
             from django.utils import timezone
             queryset = queryset.filter(date_count=timezone.localdate())
 
+        classe_param = self.request.query_params.get('classe', None) or self.request.query_params.get('classe_id', None)
+        as_of_param  = self.request.query_params.get('as_of', None)
+
+        if classe_param:
+            if as_of_param:
+                try:
+                    from django.db.models import Q as DQ
+                    as_of_date = date_type.fromisoformat(as_of_param)
+                    latest_class = StudentClassHistory.objects.filter(
+                        student=OuterRef('pk'),
+                        from_date__lte=as_of_date
+                    ).order_by('-from_date').values('classe_id')[:1]
+
+                    queryset = queryset.annotate(
+                        class_as_of=Subquery(latest_class)
+                    ).filter(
+                        # Has history → history points to this class
+                        DQ(class_as_of=int(classe_param)) |
+                        # No history yet (existing student before tracking) → use current class
+                        DQ(class_as_of__isnull=True, classe_id=int(classe_param))
+                    )
+                except (ValueError, TypeError):
+                    queryset = queryset.filter(classe_id=int(classe_param))
+            else:
+                queryset = queryset.filter(classe_id=int(classe_param))
+
         return queryset
 
     @transaction.atomic
@@ -370,17 +397,38 @@ class EtudiantViewSet(viewsets.ModelViewSet):
 
         instance = serializer.save()
 
+        # Log initial class/branch assignment
+        if instance.classe_id or instance.branche_id:
+            from django.utils import timezone
+            StudentClassHistory.objects.create(
+                student=instance,
+                classe_id=instance.classe_id,
+                branche_id=instance.branche_id,
+                from_date=instance.date_count or timezone.localdate(),
+            )
+
         response_serializer = self.get_serializer(instance)
         return Response(response_serializer.data, status=status.HTTP_201_CREATED)
 
     def perform_update(self, serializer):
+        from django.utils import timezone
         instance = serializer.instance
         old_level_id = instance.level_id
-        old_fee = Decimal(str(instance.remaining))  # fee before level change
+        old_fee = Decimal(str(instance.remaining))
+        old_classe_id = instance.classe_id
+        old_branche_id = instance.branche_id
 
         updated = serializer.save()
 
-        # If level changed and old fee was non-zero, freeze past months at old fee
+        # Log new class/branch if it changed (transfer event)
+        if updated.classe_id != old_classe_id or updated.branche_id != old_branche_id:
+            StudentClassHistory.objects.create(
+                student=updated,
+                classe_id=updated.classe_id,
+                branche_id=updated.branche_id,
+                from_date=timezone.localdate(),
+            )
+
         if updated.level_id != old_level_id and old_fee > 0:
             self._freeze_past_months_at_old_fee(updated, old_fee)
 
@@ -2114,6 +2162,26 @@ class QuarterlyReportViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['get'], url_path='bulk-get')
     def bulk_get(self, request):
+        import re as _re
+
+        def safe_float(val):
+            if not val:
+                return 0
+            try:
+                return float(val)
+            except (ValueError, TypeError):
+                m = _re.match(r'[\d.]+', str(val).strip())
+                return float(m.group()) if m else 0
+
+        def safe_int(val):
+            if not val:
+                return 0
+            try:
+                return int(val)
+            except (ValueError, TypeError):
+                m = _re.match(r'\d+', str(val).strip())
+                return int(m.group()) if m else 0
+
         classe_id = request.query_params.get('classe')
         quarter = request.query_params.get('quarter')
         year = request.query_params.get('year')
@@ -2170,9 +2238,9 @@ class QuarterlyReportViewSet(viewsets.ModelViewSet):
             for m in months:
                 r = report_map.get(m)
 
-                ahzab = float(r.ahzab or 0) if r else 0
-                thmn = float(r.thmn or 0) if r else 0
-                absence = int(r.absence or 0) if r else 0
+                ahzab = safe_float(r.ahzab) if r else 0
+                thmn = safe_float(r.thmn) if r else 0
+                absence = safe_int(r.absence) if r else 0
 
                 month_values.append({
                     "ahzab": ahzab,
@@ -2192,8 +2260,8 @@ class QuarterlyReportViewSet(viewsets.ModelViewSet):
             # FORMAT FUNCTION
             # =========================
             def format_progress(ahzab, thmn):
-                ahzab = float(ahzab or 0)
-                thmn = float(thmn or 0)
+                ahzab = safe_float(ahzab)
+                thmn = safe_float(thmn)
 
                 max_thmn = 60 * 8  # 480 thmn
 
@@ -2217,13 +2285,12 @@ class QuarterlyReportViewSet(viewsets.ModelViewSet):
                 return " و ".join(parts) if parts else "0"
 
             # =========================
-            # TOTAL (M3 - M1)
+            # TOTAL (SUM of all months)
             # =========================
-            first = month_values[0]
             last = month_values[2]
 
-            total_ahzab = last["ahzab"] - first["ahzab"]
-            total_thmn = last["thmn"] - first["thmn"]
+            total_ahzab = sum(m["ahzab"] for m in month_values)
+            total_thmn = sum(m["thmn"] for m in month_values)
 
             # =========================
             # QUARTER REPORT

@@ -287,6 +287,19 @@ class Activity(models.Model):
     def __str__(self):
         return f"{self.name} ({self.session})"
 
+class StudentClassHistory(models.Model):
+    """Records every class/branch assignment for a student, with the date it became effective."""
+    student  = models.ForeignKey('Etudiant', on_delete=models.CASCADE, related_name='class_history')
+    classe   = models.ForeignKey('Classe',   on_delete=models.SET_NULL, null=True, blank=True)
+    branche  = models.ForeignKey('Branche',  on_delete=models.SET_NULL, null=True, blank=True)
+    from_date = models.DateField()
+
+    class Meta:
+        ordering = ['student', 'from_date']
+
+    def __str__(self):
+        return f"{self.student} → {self.classe} ({self.from_date})"
+
 class AcademicYear(models.Model):
     year        = models.CharField(max_length=9, unique=True, help_text="ex: 2024-2025")
     name        = models.CharField(max_length=9, default='2025', help_text="2025")
