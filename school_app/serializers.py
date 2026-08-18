@@ -160,13 +160,14 @@ class EtudiantSerializer(serializers.ModelSerializer):
 
 class EtudiantLightSerializer(serializers.ModelSerializer):
     level_name  = serializers.CharField(source='level.level_name', read_only=True, default=None)
+    level_price = serializers.DecimalField(source='level.price', max_digits=8, decimal_places=2, read_only=True, default=None)
     agent_name  = serializers.CharField(source='agent.agent_name', read_only=True, default=None)
     last_ahzab  = serializers.SerializerMethodField()
 
     class Meta:
         model = Etudiant
         fields = ['id', 'student_name', 'part_count', 'fees', 'date_inscription',
-                  'level_name', 'agent_name', 'last_ahzab']
+                  'level_name', 'level_price', 'agent_name', 'last_ahzab']
 
     def get_last_ahzab(self, obj):
         reports = getattr(obj, '_prefetched_reports', None)

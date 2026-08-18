@@ -322,6 +322,13 @@ class AgentViewSet(viewsets.ModelViewSet):
         user.save()
         return Response({'detail': 'تم إنشاء الحساب بنجاح', 'phone': phone, 'password': phone}, status=201)
 
+    @action(detail=True, methods=['post'], url_path='mark-reminder')
+    def mark_reminder(self, request, pk=None):
+        agent = self.get_object()
+        agent.last_reminder_sent = timezone.now()
+        agent.save(update_fields=['last_reminder_sent'])
+        return Response({'last_reminder_sent': agent.last_reminder_sent.isoformat()})
+
 class AbsenceActivityViewSet(viewsets.ModelViewSet):
     queryset = AbsenceActivity.objects.all()
     serializer_class = AbsenceActivitySerializer
@@ -4269,10 +4276,12 @@ def unpaid_students(request):
     today = date.today()
 
     for student in students:
-        payments = Paiement.objects.filter(
+        payments_qs = Paiement.objects.filter(
             etudiant=student,
             academic_year=academic_year
         )
+        payments_dict = {p.month: p for p in payments_qs}
+        full_month_fee = Decimal(student.remaining or 0)
 
         total_unpaid = Decimal("0.00")
         months_unpaid = []
@@ -4304,19 +4313,20 @@ def unpaid_students(request):
 
             month_name = ARABIC_MONTHS[month_number - 1]
 
-            payments_for_month = payments.filter(
-                month=month_number,
-                academic_year=academic_year
-            )
-
-            month_fee = Decimal(student.remaining or 0)
-            payments_for_month = payments.filter(month=month_number)
-            total_paid = sum(Decimal(p.paid_amount or 0) for p in payments_for_month)
-
-            if total_paid < month_fee:
-                month_remaining = month_fee - total_paid
+            payment = payments_dict.get(month_number)
+            if payment:
+                month_remaining = max(Decimal("0.00"), Decimal(str(payment.remaining_amount or 0)))
             else:
-                month_remaining = Decimal("0.00")
+                is_registration_month = (
+                    current.year == student.date_inscription.year and
+                    current.month == student.date_inscription.month
+                )
+                if is_registration_month:
+                    days_in_month = monthrange(current.year, current.month)[1]
+                    proportion = Decimal(days_in_month - student.date_inscription.day + 1) / Decimal(days_in_month)
+                    month_remaining = (full_month_fee * proportion).quantize(Decimal("0.01"))
+                else:
+                    month_remaining = full_month_fee
 
             if month_remaining > 0:
                 months_unpaid.append(month_name)
@@ -4385,14 +4395,16 @@ def unpaid_students_not_have_agent(request):
     today = date.today()
 
     for student in students:
-        payments = Paiement.objects.filter(
+        payments_qs = Paiement.objects.filter(
             etudiant=student,
             academic_year=academic_year
         )
+        payments_dict = {p.month: p for p in payments_qs}
 
         total_unpaid = Decimal("0.00")
         months_unpaid = []
 
+        full_month_fee = Decimal(student.remaining or 0)
         start_date = max(student.date_inscription, academic_year.start_date)
         end_date = min(today, academic_year.end_date)
 
@@ -4418,25 +4430,24 @@ def unpaid_students_not_have_agent(request):
                 continue
 
             month_name = ARABIC_MONTHS[month_number - 1]
+            payment = payments_dict.get(month_number)
 
-            payments_for_month = payments.filter(month=month_number)
-
-            # if payments_for_month.exists():
-            #     month_remaining = sum(Decimal(p.remaining_amount or 0) for p in payments_for_month)
-            # else:
-            #     # Aucun paiement → utiliser le montant restant général
-            #     month_remaining = Decimal(student.remaining or 0)
-
-            month_fee = Decimal(student.remaining or 0)
-
-            payments_for_month = payments.filter(month=month_number)
-
-            total_paid = sum(Decimal(p.paid_amount or 0) for p in payments_for_month)
-
-            if total_paid < month_fee:
-                month_remaining = month_fee - total_paid
+            if payment:
+                # Use the stored remaining_amount — computed correctly at payment time
+                # (accounts for proration, discounts, partial payments, fee changes)
+                month_remaining = max(Decimal("0.00"), Decimal(str(payment.remaining_amount or 0)))
             else:
-                month_remaining = Decimal("0.00")
+                # No payment record yet — calculate due with proration for registration month
+                is_registration_month = (
+                    current.year  == student.date_inscription.year and
+                    current.month == student.date_inscription.month
+                )
+                if is_registration_month:
+                    days_in_month = monthrange(current.year, current.month)[1]
+                    proportion = Decimal(days_in_month - student.date_inscription.day + 1) / Decimal(days_in_month)
+                    month_remaining = (full_month_fee * proportion).quantize(Decimal("0.01"))
+                else:
+                    month_remaining = full_month_fee
 
             if month_remaining > 0:
                 months_unpaid.append(month_name)
@@ -4511,14 +4522,16 @@ def unpaid_by_agent(request):
     today = date.today()
 
     for student in students:
-        payments = Paiement.objects.filter(
+        payments_qs = Paiement.objects.filter(
             etudiant=student,
             academic_year=academic_year
         )
+        payments_dict = {p.month: p for p in payments_qs}
 
         total_unpaid = Decimal("0.00")
         months_unpaid = []
 
+        full_month_fee = Decimal(student.remaining or 0)
         start_date = max(student.date_inscription, academic_year.start_date)
         end_date = min(today, academic_year.end_date)
 
@@ -4544,30 +4557,29 @@ def unpaid_by_agent(request):
                 continue
 
             month_name = ARABIC_MONTHS[month_number - 1]
+            payment = payments_dict.get(month_number)
 
-            payments_for_month = payments.filter(month=month_number)
-
-            # if payments_for_month.exists():
-            #     month_remaining = sum(Decimal(p.remaining_amount or 0) for p in payments_for_month)
-            # else:
-            #     month_remaining = Decimal(student.remaining or 0)
-
-            month_fee = Decimal(student.remaining or 0)
-
-            payments_for_month = payments.filter(month=month_number)
-
-            total_paid = sum(Decimal(p.paid_amount or 0) for p in payments_for_month)
-
-            if total_paid < month_fee:
-                month_remaining = month_fee - total_paid
+            if payment:
+                # Trust the stored remaining_amount — set correctly at payment time
+                month_remaining = max(Decimal("0.00"), Decimal(str(payment.remaining_amount or 0)))
             else:
-                month_remaining = Decimal("0.00")
+                # No payment yet — prorate the registration month
+                is_registration_month = (
+                    current.year  == student.date_inscription.year and
+                    current.month == student.date_inscription.month
+                )
+                if is_registration_month:
+                    days_in_month = monthrange(current.year, current.month)[1]
+                    proportion = Decimal(days_in_month - student.date_inscription.day + 1) / Decimal(days_in_month)
+                    month_remaining = (full_month_fee * proportion).quantize(Decimal("0.01"))
+                else:
+                    month_remaining = full_month_fee
 
             if month_remaining > 0:
                 months_unpaid.append(month_name)
                 total_unpaid += month_remaining
 
-            # passer au mois suivant 
+            # passer au mois suivant
             if current.month == 12:
                 current = date(current.year + 1, 1, 1)
             else:
@@ -4585,7 +4597,9 @@ def unpaid_by_agent(request):
                 }
 
             agents[agent_id]["students"].append({
+                "student_id": student.id,
                 "student_name": student.student_name,
+                "month_fee": float(student.remaining or 0),
                 "phone": student.agent.whatsapp_phone if student.agent and student.agent.whatsapp_phone else student.phone,
                 "months_unpaid": ", ".join(months_unpaid),
                 "unpaid_amount": float(total_unpaid),
@@ -4594,7 +4608,213 @@ def unpaid_by_agent(request):
                 "class_name": student.classe.nom if student.classe else ""
             })
 
-    return Response(list(agents.values()))
+    result = list(agents.values())
+    # Attach last_reminder_sent from the Agent model
+    agent_objs = {a.id: a for a in Agent.objects.filter(id__in=[r['agent_id'] for r in result])}
+    for r in result:
+        agent_obj = agent_objs.get(r['agent_id'])
+        r['last_reminder_sent'] = agent_obj.last_reminder_sent.isoformat() if agent_obj and agent_obj.last_reminder_sent else None
+    return Response(result)
+
+
+@api_view(['POST'])
+def quick_pay(request):
+    """Process payment without generating a receipt — creates Paiement + Transaction only."""
+    data      = request.data
+    payments  = data.get('payments', [])   # [{student, month, academic_year, due_amount, paid_amount, month_name_ar}]
+    bank_id   = data.get('bank')
+    agent_id  = data.get('agent_id')
+    agent_name = data.get('agent_name', '')
+
+    if not payments or not bank_id:
+        return Response({'error': 'payments and bank are required'}, status=400)
+
+    with transaction.atomic():
+        total_due  = sum(Decimal(str(p['due_amount']))  for p in payments)
+        total_paid = sum(Decimal(str(p['paid_amount'])) for p in payments)
+        total_remaining = max(Decimal('0.00'), total_due - total_paid)
+
+        months_str = ', '.join(str(p['month']) for p in payments)
+        months_ar  = ', '.join(p.get('month_name_ar', str(p['month'])) for p in payments)
+
+        if agent_id:
+            desc = f"دفع سريع — الوكيل {agent_name} — الأشهر: {months_ar}"
+        else:
+            student_name = Etudiant.objects.get(pk=payments[0]['student']).student_name if payments else ''
+            desc = f"دفع سريع — الطالب(ة) {student_name} — الأشهر: {months_ar}"
+
+        # Transaction (accounting record)
+        Transaction.objects.create(
+            student=None,
+            agent_id=agent_id,
+            month=months_str,
+            due_amount=total_due,
+            paid_amount=total_paid,
+            remaining_amount=total_remaining,
+            date=timezone.now(),
+            description=desc,
+            bank_id=bank_id,
+            user=request.user
+        )
+
+        # Paiement records (cumulative per student/month)
+        for p in payments:
+            student = Etudiant.objects.get(pk=p['student'])
+            paiement, created = Paiement.objects.get_or_create(
+                etudiant=student,
+                academic_year_id=p['academic_year'],
+                month=p['month'],
+                defaults={
+                    'due_amount':       Decimal(str(p['due_amount'])),
+                    'paid_amount':      Decimal(str(p['paid_amount'])),
+                    'remaining_amount': max(Decimal('0.00'), Decimal(str(p['due_amount'])) - Decimal(str(p['paid_amount']))),
+                    'bank_id':   bank_id,
+                    'agent_id':  agent_id,
+                    'user':      request.user,
+                }
+            )
+            if not created:
+                paiement.paid_amount += Decimal(str(p['paid_amount']))
+                paiement.remaining_amount = max(Decimal('0.00'), paiement.due_amount - paiement.paid_amount)
+                paiement.bank_id  = bank_id
+                paiement.agent_id = agent_id
+                paiement.user     = request.user
+                paiement.save()
+
+    return Response({'message': 'تم الدفع بنجاح'})
+
+
+@api_view(['GET'])
+def unpaid_suspended(request):
+    """Suspended students (etat='suspendu') who still have unpaid months."""
+    year_id   = request.GET.get('year_id')
+    month     = request.GET.get('month')
+    branch_id = request.GET.get('branch_id')
+    class_id  = request.GET.get('class_id')
+    agent_id  = request.GET.get('agent_id')
+
+    if month in [None, "", "null", "undefined"]:
+        month = None
+    else:
+        month = int(month)
+
+    if not year_id:
+        return Response({"error": "year_id est obligatoire"}, status=400)
+
+    try:
+        academic_year = AcademicYear.objects.get(id=year_id)
+    except AcademicYear.DoesNotExist:
+        return Response({"error": "année académique non trouvée"}, status=404)
+
+    students = Etudiant.objects.filter(
+        is_inscrire=1,
+        payment_nature='mensuel',
+        etat='suspendu',
+        is_active=True,
+        date_desectivation__isnull=False,
+    ).select_related('agent', 'branche', 'classe')
+
+    user = request.user
+    is_admin_g = user.role and user.role.title == 'admin_g'
+
+    if branch_id:
+        students = students.filter(branche_id=branch_id)
+    elif not is_admin_g:
+        user_branches = user.branches.values_list('id', flat=True)
+        if user_branches:
+            students = students.filter(branche_id__in=user_branches)
+
+    if class_id:
+        students = students.filter(classe_id=class_id)
+
+    if agent_id:
+        students = students.filter(agent_id=agent_id)
+
+    result = []
+
+    for student in students:
+        suspend_date    = student.date_desectivation
+        full_month_fee  = Decimal(student.remaining or 0)
+        registration_date = student.date_inscription
+
+        # Enrollment window clipped to academic year
+        period_start = max(registration_date, academic_year.start_date)
+        period_end   = min(suspend_date, academic_year.end_date)
+
+        if period_start > period_end:
+            continue
+
+        payments = Paiement.objects.filter(
+            etudiant=student,
+            academic_year=academic_year
+        ).values('month', 'paid_amount', 'remaining_amount')
+        payments_dict = {p['month']: p for p in payments}
+
+        total_unpaid  = Decimal("0.00")
+        months_unpaid = []
+
+        cursor = date(period_start.year, period_start.month, 1)
+
+        while cursor <= period_end.replace(day=1):
+            m     = cursor.month
+            year  = cursor.year
+            payment = payments_dict.get(m)
+
+            if month and m != month:
+                cursor = date(year + 1, 1, 1) if m == 12 else date(year, m + 1, 1)
+                continue
+
+            days_in_month         = monthrange(year, m)[1]
+            is_suspend_month      = (year == suspend_date.year and m == suspend_date.month)
+            is_registration_month = (year == registration_date.year and m == registration_date.month)
+
+            # Same proration logic as unpaid_months_until_suspend
+            if is_registration_month and is_suspend_month:
+                days_to_pay = suspend_date.day - registration_date.day
+                proportion  = Decimal(days_to_pay) / Decimal(days_in_month)
+                due_amount  = (full_month_fee * proportion).quantize(Decimal("0.01"))
+            elif is_registration_month:
+                proportion = Decimal(days_in_month - registration_date.day + 1) / Decimal(days_in_month)
+                due_amount = (full_month_fee * proportion).quantize(Decimal("0.01"))
+            elif is_suspend_month:
+                proportion = Decimal(suspend_date.day) / Decimal(days_in_month)
+                due_amount = (full_month_fee * proportion).quantize(Decimal("0.01"))
+            else:
+                due_amount = full_month_fee
+
+            if payment:
+                paid_amount      = Decimal(payment['paid_amount'])
+                remaining_amount = due_amount - paid_amount
+                if remaining_amount < 0:
+                    remaining_amount = Decimal("0.00")
+            else:
+                paid_amount      = Decimal("0.00")
+                remaining_amount = due_amount
+
+            if remaining_amount > 0:
+                months_unpaid.append(ARABIC_MONTHS[m - 1])
+                total_unpaid += remaining_amount
+
+            cursor = date(year + 1, 1, 1) if m == 12 else date(year, m + 1, 1)
+
+        if total_unpaid > 0:
+            result.append({
+                "student_id":       student.id,
+                "student_name":     student.student_name,
+                "suspension_date":  str(suspend_date),
+                "phone":            student.phone,
+                "agent_id":         student.agent.id           if student.agent else None,
+                "agent_name":       student.agent.agent_name   if student.agent else None,
+                "agent_phone":      student.agent.phone        if student.agent else None,
+                "whatsapp_phone":   student.agent.whatsapp_phone if student.agent and student.agent.whatsapp_phone else student.phone,
+                "months_unpaid":    ", ".join(months_unpaid),
+                "unpaid_amount":    float(total_unpaid),
+                "branch_name":      student.branche.nom if student.branche else "",
+                "class_name":       student.classe.nom  if student.classe  else "",
+            })
+
+    result.sort(key=lambda x: x["unpaid_amount"], reverse=True)
+    return Response(result)
 
 
 @api_view(['GET'])

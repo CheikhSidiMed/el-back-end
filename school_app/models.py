@@ -153,9 +153,10 @@ class Agent(models.Model):
     phone_2 = models.CharField(max_length=20, null=True, blank=True)
     profession = models.CharField(max_length=100, null=True, blank=True)
     whatsapp_phone = models.CharField(max_length=20, null=True, blank=True)
+    last_reminder_sent = models.DateTimeField(null=True, blank=True)
 
     class Meta:
-        ordering = ['-id'] 
+        ordering = ['-id']
 
     def __str__(self):
         return self.agent_name
