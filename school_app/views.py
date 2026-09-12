@@ -752,6 +752,7 @@ class TransactionViewSet(viewsets.ModelViewSet):
             old_type = old_instance.type
             old_bank = old_instance.bank
             old_account = old_instance.account
+            transfer_ref = old_instance.transfer_ref
 
             # Save without triggering the balance signal
             updated_tx = serializer.save(is_adjustment=True)
@@ -763,15 +764,33 @@ class TransactionViewSet(viewsets.ModelViewSet):
                 setattr(obj, field, current + amount if op == 'plus' else current - amount)
                 obj.save(update_fields=[field])
 
-            # Reverse old effect
+            # Reverse old effect on this transaction
             reverse = 'minus' if old_type == 'plus' else 'plus'
             adjust(old_bank, 'balance', old_amount, reverse)
             adjust(old_account, 'balance', old_amount, reverse)
 
-            # Apply new effect
+            # Apply new effect on this transaction
             new_amount = Decimal(str(updated_tx.paid_amount))
             adjust(updated_tx.bank, 'balance', new_amount, updated_tx.type)
             adjust(updated_tx.account, 'balance', new_amount, updated_tx.type)
+
+            # If this is a bank transfer, sync the partner transaction
+            if transfer_ref:
+                partner = Transaction.objects.filter(
+                    transfer_ref=transfer_ref
+                ).exclude(id=updated_tx.id).first()
+                if partner:
+                    partner_old_amount = Decimal(str(partner.paid_amount))
+                    partner_old_type = partner.type
+                    partner_bank = partner.bank
+                    # Reverse old partner bank balance
+                    partner_reverse = 'minus' if partner_old_type == 'plus' else 'plus'
+                    adjust(partner_bank, 'balance', partner_old_amount, partner_reverse)
+                    # Update partner amount and apply new balance
+                    partner.paid_amount = new_amount
+                    partner._skip_signal = True
+                    partner.save(update_fields=['paid_amount'])
+                    adjust(partner_bank, 'balance', new_amount, partner_old_type)
 
             return updated_tx
 
@@ -2604,6 +2623,9 @@ class BankTransferView(APIView):
         if desc_extra:
             description += f" {{ {desc_extra} }}"
 
+        import uuid
+        ref = str(uuid.uuid4())
+
         with db_transaction.atomic():
 
             # 🔻 Transaction débit (source)
@@ -2613,6 +2635,7 @@ class BankTransferView(APIView):
                 type="minus",
                 description=description,
                 user=request.user,
+                transfer_ref=ref,
             )
 
             # 🔺 Transaction crédit (destination)
@@ -2622,7 +2645,10 @@ class BankTransferView(APIView):
                 type="plus",
                 description=description,
                 user=request.user,
+                transfer_ref=ref,
             )
+
+            # balances updated automatically by post_save signal
 
         return Response({
             "message": "تم تحويل الأموال بنجاح",

@@ -788,6 +788,7 @@ class Transaction(models.Model):
         related_name="adjustments"
     )
     is_adjustment = models.BooleanField(default=False)
+    transfer_ref = models.CharField(max_length=64, null=True, blank=True, db_index=True)
     is_paiy_month = models.BooleanField(default=False)
 
     class Meta:
