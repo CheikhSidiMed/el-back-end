@@ -28,7 +28,7 @@ from django.dispatch import receiver
 from django.db.models.signals import post_save, pre_save, post_delete
 from django.conf import settings
 import json, threading
-from .pagination import EtudiantPagination
+from .pagination import EtudiantPagination, AgentPagination
 from rest_framework import filters
 from django.db import transaction as db_transaction
 from .filters import UtilisateurFilter
@@ -319,6 +319,7 @@ class AgentViewSet(viewsets.ModelViewSet):
         user.first_name = agent.agent_name
         user.role = agent_role
         user.agent_profile = agent
+        user.must_change_password = True
         user.save()
         return Response({'detail': 'تم إنشاء الحساب بنجاح', 'phone': phone, 'password': phone}, status=201)
 
@@ -328,6 +329,15 @@ class AgentViewSet(viewsets.ModelViewSet):
         agent.last_reminder_sent = timezone.now()
         agent.save(update_fields=['last_reminder_sent'])
         return Response({'last_reminder_sent': agent.last_reminder_sent.isoformat()})
+
+class AgentPaginationViewSet(viewsets.ReadOnlyModelViewSet):
+    serializer_class = AgentSerializer
+    pagination_class = AgentPagination
+    filter_backends = [filters.SearchFilter, DjangoFilterBackend]
+    search_fields = ['agent_name', 'phone', 'phone_2', 'whatsapp_phone', 'profession']
+
+    def get_queryset(self):
+        return Agent.objects.all().order_by('agent_name')
 
 class AbsenceActivityViewSet(viewsets.ModelViewSet):
     queryset = AbsenceActivity.objects.all()
@@ -609,6 +619,92 @@ class AccountViewSet(viewsets.ModelViewSet):
     queryset = Account.objects.all()
     serializer_class = AccountSerializer
 
+    def create(self, request, *args, **kwargs):
+        from rest_framework import status as drf_status
+        opening_balance = request.data.get('opening_balance')
+        opening_type = request.data.get('opening_balance_type', 'plus')
+
+        data = {k: v for k, v in request.data.items()
+                if k not in ('opening_balance', 'opening_balance_type')}
+        if not data.get('balance'):
+            data['balance'] = 0
+
+        serializer = self.get_serializer(data=data)
+        serializer.is_valid(raise_exception=True)
+        account = serializer.save()
+
+        if opening_balance:
+            try:
+                amount = Decimal(str(opening_balance))
+                if amount > 0:
+                    Transaction.objects.create(
+                        account=account,
+                        paid_amount=amount,
+                        type=opening_type,
+                        description='الرصيد الافتتاحي',
+                        user=request.user,
+                    )
+            except Exception:
+                pass
+
+        headers = self.get_success_headers(serializer.data)
+        return Response(serializer.data, status=drf_status.HTTP_201_CREATED, headers=headers)
+
+    @action(detail=False, methods=['get'], url_path='totals')
+    def totals(self, request):
+        from django.db.models import Sum, Case, When, Value, DecimalField
+        from django.db.models.functions import Coalesce
+
+        def compute(qs):
+            stats = qs.aggregate(
+                total_plus=Coalesce(
+                    Sum(Case(When(type='plus', then='paid_amount'), default=Value(0), output_field=DecimalField())),
+                    Value(0), output_field=DecimalField()
+                ),
+                total_minus=Coalesce(
+                    Sum(Case(When(type='minus', then='paid_amount'), default=Value(0), output_field=DecimalField())),
+                    Value(0), output_field=DecimalField()
+                ),
+            )
+            stats['balance'] = stats['total_plus'] - stats['total_minus']
+            return stats
+
+        return Response({
+            'accounts': compute(Transaction.objects.filter(account__isnull=False)),
+            'banks':    compute(Transaction.objects.filter(bank__isnull=False)),
+        })
+
+    @action(detail=False, methods=['get'], url_path='per-totals')
+    def per_totals(self, request):
+        from django.db.models import Sum, Case, When, Value, DecimalField
+        from django.db.models.functions import Coalesce
+
+        def group(qs, group_field):
+            rows = qs.values(group_field).annotate(
+                total_plus=Coalesce(
+                    Sum(Case(When(type='plus', then='paid_amount'), default=Value(0), output_field=DecimalField())),
+                    Value(0), output_field=DecimalField()
+                ),
+                total_minus=Coalesce(
+                    Sum(Case(When(type='minus', then='paid_amount'), default=Value(0), output_field=DecimalField())),
+                    Value(0), output_field=DecimalField()
+                ),
+            )
+            result = {}
+            for row in rows:
+                row['balance'] = row['total_plus'] - row['total_minus']
+                result[str(row[group_field])] = {
+                    'total_plus': float(row['total_plus']),
+                    'total_minus': float(row['total_minus']),
+                    'balance': float(row['balance']),
+                }
+            return result
+
+        return Response({
+            'accounts': group(Transaction.objects.filter(account__isnull=False), 'account_id'),
+            'banks':    group(Transaction.objects.filter(bank__isnull=False), 'bank_id'),
+        })
+
 class TransactionViewSet(viewsets.ModelViewSet):
     queryset = Transaction.objects.all()
     serializer_class = TransactionSerializer
@@ -651,40 +747,31 @@ class TransactionViewSet(viewsets.ModelViewSet):
 
     def perform_update(self, serializer):
         with db_transaction.atomic():
-
             old_instance = self.get_object()
-            old_amount = old_instance.paid_amount
+            old_amount = Decimal(str(old_instance.paid_amount))
+            old_type = old_instance.type
+            old_bank = old_instance.bank
+            old_account = old_instance.account
 
-            # 🔹 update sans toucher au solde
+            # Save without triggering the balance signal
             updated_tx = serializer.save(is_adjustment=True)
 
-            delta = updated_tx.paid_amount - old_amount
+            def adjust(obj, field, amount, op):
+                if not obj:
+                    return
+                current = Decimal(str(getattr(obj, field, 0)))
+                setattr(obj, field, current + amount if op == 'plus' else current - amount)
+                obj.save(update_fields=[field])
 
-            if delta != 0:
-                # 🔹 appliquer uniquement la différence
-                if delta > 0:
-                    updated_tx.bank.balance += delta
-                    tx_type = "plus"
-                else:
-                    updated_tx.bank.balance -= abs(delta)
-                    tx_type = "minus"
+            # Reverse old effect
+            reverse = 'minus' if old_type == 'plus' else 'plus'
+            adjust(old_bank, 'balance', old_amount, reverse)
+            adjust(old_account, 'balance', old_amount, reverse)
 
-                updated_tx.bank.save()
-
-                # 🔹 historique (optionnel)
-                Transaction.objects.create(
-                    student=updated_tx.student,
-                    bank=updated_tx.bank,
-                    account=updated_tx.account,
-                    employee=updated_tx.employee,
-                    inscription=updated_tx.inscription,
-                    user=self.request.user,
-                    paid_amount=abs(delta),
-                    type=tx_type,
-                    description=f"تعديل على المعاملة رقم {updated_tx.id} / {updated_tx.description}",
-                    is_adjustment=True,
-                    related_transaction=updated_tx,
-                )
+            # Apply new effect
+            new_amount = Decimal(str(updated_tx.paid_amount))
+            adjust(updated_tx.bank, 'balance', new_amount, updated_tx.type)
+            adjust(updated_tx.account, 'balance', new_amount, updated_tx.type)
 
             return updated_tx
 
@@ -1289,6 +1376,37 @@ class BankAccountViewSet(viewsets.ModelViewSet):
     queryset = BankAccount.objects.all()
     serializer_class = BankAccountSerializer
 
+    def create(self, request, *args, **kwargs):
+        from rest_framework import status as drf_status
+        opening_balance = request.data.get('opening_balance')
+        opening_type = request.data.get('opening_balance_type', 'plus')
+
+        data = {k: v for k, v in request.data.items()
+                if k not in ('opening_balance', 'opening_balance_type')}
+        if not data.get('balance'):
+            data['balance'] = 0
+
+        serializer = self.get_serializer(data=data)
+        serializer.is_valid(raise_exception=True)
+        bank = serializer.save()
+
+        if opening_balance:
+            try:
+                amount = Decimal(str(opening_balance))
+                if amount > 0:
+                    Transaction.objects.create(
+                        bank=bank,
+                        paid_amount=amount,
+                        type=opening_type,
+                        description='الرصيد الافتتاحي',
+                        user=request.user,
+                    )
+            except Exception:
+                pass
+
+        headers = self.get_success_headers(serializer.data)
+        return Response(serializer.data, status=drf_status.HTTP_201_CREATED, headers=headers)
+
 class PermissionViewSet(viewsets.ModelViewSet):
     queryset = Permission.objects.all()
     serializer_class = PermissionSerializer
@@ -1321,7 +1439,7 @@ class ReceiptViewSet(viewsets.ModelViewSet):
             'agent', 'garant', 'employee',
             'account', 'account__category',
             'created_by', 'academic_year'
-        ).order_by('-receipt_id')
+        ).order_by('-receipt_date', '-receipt_id')
 
         search     = request.query_params.get('search', '').strip()
         date_from  = request.query_params.get('date_from')
@@ -1343,8 +1461,8 @@ class ReceiptViewSet(viewsets.ModelViewSet):
 
             if date_from:
                 qs = qs.filter(receipt_date__gte=date_from)
-            elif not date_to:
-                # no date filter supplied → default to today only
+            elif not date_to and not search:
+                # no date filter and no search → default to today only
                 from django.utils import timezone
                 qs = qs.filter(receipt_date=timezone.localdate())
 
@@ -2415,7 +2533,27 @@ class UtilisateurViewSet(viewsets.ModelViewSet):
             {"detail": "تم تحديث كلمة المرور بنجاح"},
             status=status.HTTP_200_OK
         )
-            
+
+    @action(detail=True, methods=['post'], url_path='first-login-change-password', permission_classes=[AllowAny])
+    def first_login_change_password(self, request, pk=None):
+        user = self.get_object()
+        new_password = request.data.get('new_password', '')
+
+        if not new_password or not str(new_password).isdigit() or len(str(new_password)) != 4:
+            return Response(
+                {"detail": "يجب أن تكون كلمة المرور الجديدة 4 أرقام"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        user.set_password(str(new_password))
+        user.must_change_password = False
+        user.save()
+
+        return Response(
+            {"detail": "تم تحديث كلمة المرور بنجاح"},
+            status=status.HTTP_200_OK
+        )
+
 class MyTokenObtainPairView(TokenObtainPairView):
     serializer_class = MyTokenObtainPairSerializer
 
@@ -4218,7 +4356,17 @@ def filter_transactions_account(request):
     if bank_id:
         transactions = transactions.filter(bank_id=bank_id)
 
-    serializer = TransactionSerializer(transactions, many=True)
+    # Pin opening-balance transaction first (always visible regardless of date filter)
+    opening_txns = []
+    if account_id:
+        opening_qs = Transaction.objects.filter(
+            account_id=account_id,
+            description='الرصيد الافتتاحي'
+        ).exclude(id__in=transactions.values_list('id', flat=True))
+        opening_txns = list(opening_qs)
+
+    all_txns = opening_txns + list(transactions)
+    serializer = TransactionSerializer(all_txns, many=True)
 
     # ---- Totaux période ----
     total_plus = transactions.filter(type="plus").aggregate(s=Sum("paid_amount"))["s"] or 0
@@ -5194,10 +5342,10 @@ def get_last_receipt(request):
     receipt = None
 
     if student_id:
-        receipt = Receipt.objects.filter(student_id=student_id).order_by('-receipt_id').first()
+        receipt = Receipt.objects.filter(student_id=student_id).order_by('-receipt_date', '-receipt_id').first()
 
     elif agent_id:
-        receipt = Receipt.objects.filter(agent_id=agent_id).order_by('-receipt_id').first()
+        receipt = Receipt.objects.filter(agent_id=agent_id).order_by('-receipt_date', '-receipt_id').first()
 
     if not receipt:
         return Response({"message": "no receipt"})
@@ -5260,7 +5408,7 @@ def get_last_agent_receipt(request):
     receipt = None
 
     if agent_id:
-        receipt = Receipt.objects.filter(agent_id=agent_id).order_by('-receipt_id').first()
+        receipt = Receipt.objects.filter(agent_id=agent_id).order_by('-receipt_date', '-receipt_id').first()
 
     if not receipt:
         return Response({"message": "no receipt"})

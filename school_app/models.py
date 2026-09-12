@@ -103,6 +103,7 @@ class Utilisateur(AbstractUser):
     branches = models.ManyToManyField(Branche, blank=True)
     classe = models.ForeignKey('Classe', on_delete=models.SET_NULL, null=True, blank=True, related_name='user_class')
     phone = models.CharField(max_length=15, unique=True, null=True, blank=True)
+    must_change_password = models.BooleanField(default=False)
 
     username = None
     last_name = None
@@ -852,7 +853,7 @@ class Receipt(models.Model):
     )
 
     class Meta:
-        ordering = ['-receipt_id']
+        ordering = ['-receipt_date', '-receipt_id']
 
     def __str__(self):
         return f"Receipt {self.receipt_id} - {self.total_amount}"
@@ -1316,6 +1317,7 @@ class Attestation(models.Model):
         blank=True, null=True,
         related_name='attestations'
     )
+    student_name = models.CharField(max_length=255, blank=True, null=True)
 
     type = models.CharField(max_length=20, choices=TYPE_CHOICES)
     deceased = models.CharField(max_length=255, blank=True, null=True)

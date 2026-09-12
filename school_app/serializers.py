@@ -166,7 +166,7 @@ class EtudiantLightSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Etudiant
-        fields = ['id', 'student_name', 'part_count', 'fees', 'date_inscription',
+        fields = ['id', 'student_name', 'part_count', 'fees', 'remaining', 'date_inscription',
                   'level_name', 'level_price', 'agent_name', 'last_ahzab']
 
     def get_last_ahzab(self, obj):
@@ -397,7 +397,7 @@ class GarantSerializer(serializers.ModelSerializer):
 class TransactionSerializer(serializers.ModelSerializer):
     bank = BankAccountSerializer(read_only=True)
     bank_id = serializers.PrimaryKeyRelatedField(
-        queryset=BankAccount.objects.all(), source='bank', write_only=True, required=True
+        queryset=BankAccount.objects.all(), source='bank', write_only=True, required=False, allow_null=True
     )
     agent = AgentSerializer(read_only=True)
     agent_id = serializers.PrimaryKeyRelatedField(
@@ -547,6 +547,7 @@ class MyTokenObtainPairSerializer(TokenObtainPairSerializer):
         data = super().validate(attrs)
         data['user'] = UtilisateurSerializer(self.user).data
         data['user']['agent_profile_id'] = self.user.agent_profile_id
+        data['user']['must_change_password'] = self.user.must_change_password
         return data
 
 class AcademicYearSerializer(serializers.ModelSerializer):
@@ -760,9 +761,16 @@ class EtudiantCertifiedSerializer(serializers.ModelSerializer):
         fields = '__all__'
 
 class AttestationSerializer(serializers.ModelSerializer):
+    display_name = serializers.SerializerMethodField()
+
     class Meta:
         model = Attestation
         fields = '__all__'
+
+    def get_display_name(self, obj):
+        if obj.etudiant:
+            return obj.etudiant.student_name
+        return obj.student_name or None
 
 
 class ExitCertificateSerializer(serializers.ModelSerializer):
