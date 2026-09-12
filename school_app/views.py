@@ -304,12 +304,30 @@ class AgentViewSet(viewsets.ModelViewSet):
             status=status.HTTP_204_NO_CONTENT
         )
 
+    @action(detail=True, methods=['post'], url_path='reset-password')
+    def reset_password(self, request, pk=None):
+        agent = self.get_object()
+        if not hasattr(agent, 'user_account') or agent.user_account is None:
+            return Response({'detail': 'لا يوجد حساب لهذا الوكيل'}, status=400)
+        user = agent.user_account
+        user.set_password('1234')
+        user.must_change_password = True
+        user.save()
+        return Response({'detail': 'تم إعادة تعيين كلمة المرور إلى 1234'}, status=200)
+
     @action(detail=True, methods=['post'], url_path='create-account')
     def create_account(self, request, pk=None):
         agent = self.get_object()
         if hasattr(agent, 'user_account') and agent.user_account is not None:
             return Response({'detail': 'الحساب موجود مسبقاً', 'phone': agent.user_account.phone}, status=200)
-        phone = agent.phone
+        raw_phone = agent.phone or ''
+        # Strip Mauritanian country code prefix so login uses local 8-digit number
+        phone = raw_phone.lstrip('+')
+        for prefix in ('00222', '222'):
+            if phone.startswith(prefix):
+                phone = phone[len(prefix):]
+                break
+        phone = phone.strip()
         if not phone:
             return Response({'detail': 'لا يوجد رقم هاتف للوكيل'}, status=400)
         if Utilisateur.objects.filter(phone=phone).exists():
@@ -337,7 +355,7 @@ class AgentPaginationViewSet(viewsets.ReadOnlyModelViewSet):
     search_fields = ['agent_name', 'phone', 'phone_2', 'whatsapp_phone', 'profession']
 
     def get_queryset(self):
-        return Agent.objects.all().order_by('agent_name')
+        return Agent.objects.all().order_by('-id')
 
 class AbsenceActivityViewSet(viewsets.ModelViewSet):
     queryset = AbsenceActivity.objects.all()

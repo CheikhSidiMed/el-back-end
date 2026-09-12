@@ -545,6 +545,21 @@ class MyTokenObtainPairSerializer(TokenObtainPairSerializer):
 
     def validate(self, attrs):
         data = super().validate(attrs)
+
+        # Block agent login if they have no students or all students are suspended
+        agent = getattr(self.user, 'agent_profile', None)
+        if agent is not None:
+            students = Etudiant.objects.filter(agent=agent)
+            if not students.exists():
+                raise serializers.ValidationError(
+                    "لا يمكنك تسجيل الدخول: لا يوجد طلاب مسجلون باسمك."
+                )
+            non_suspended = students.exclude(etat='suspendu')
+            if not non_suspended.exists():
+                raise serializers.ValidationError(
+                    "لا يمكنك تسجيل الدخول: جميع طلابك موقوفون."
+                )
+
         data['user'] = UtilisateurSerializer(self.user).data
         data['user']['agent_profile_id'] = self.user.agent_profile_id
         data['user']['must_change_password'] = self.user.must_change_password
