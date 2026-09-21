@@ -1,6 +1,29 @@
 from rest_framework import serializers
-from .models import Branche, Classe, Niveau, Agent, Etudiant, Mois, Exam, Paiement, Inscription, Garant, Attestation, GarantPaiement, SalaryPayment, Employee, Job, BankAccount, Receipt, ReceiptPayment, Utilisateur, Activity, AcademicYear, MonthlyReport, DailyAbsence, StudentFixedAbsence, AccountCategory, Account, Transaction, Permission, Suspension, AbsenceActivity, AbsElmhdara, Competition, Tasfiya, Juge, Participant, Evaluation, CompetitionLevel, PaiementTransations, EtudiantCertified, QuarterlyReport, EvaluationResult, EvaluationPeriod, EvaluationMonthResult, ExitCertificate, DeliveryReceipt, DeliveryPeriod, TehejiReport
+from .models import SchoolNotification, LibraryCategory, LibraryBook, Branche, Classe, Niveau, Agent, Etudiant, Mois, Exam, Paiement, Inscription, Garant, Attestation, GarantPaiement, SalaryPayment, Employee, Job, BankAccount, Receipt, ReceiptPayment, Utilisateur, Activity, AcademicYear, MonthlyReport, DailyAbsence, StudentFixedAbsence, AccountCategory, Account, Transaction, Permission, Suspension, AbsenceActivity, AbsElmhdara, Competition, Tasfiya, Juge, Participant, Evaluation, CompetitionLevel, PaiementTransations, EtudiantCertified, QuarterlyReport, EvaluationResult, EvaluationPeriod, EvaluationMonthResult, ExitCertificate, DeliveryReceipt, DeliveryPeriod, TehejiReport
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
+from rest_framework_simplejwt.exceptions import AuthenticationFailed as JWTAuthFailed
+
+
+class SchoolNotificationSerializer(serializers.ModelSerializer):
+    class Meta:
+        model  = SchoolNotification
+        fields = ['id', 'title', 'body', 'image', 'notification_type', 'day_of_month', 'is_active', 'created_at']
+        read_only_fields = ['created_at']
+
+
+class LibraryCategorySerializer(serializers.ModelSerializer):
+    class Meta:
+        model  = LibraryCategory
+        fields = ['id', 'name']
+
+
+class LibraryBookSerializer(serializers.ModelSerializer):
+    category_name = serializers.CharField(source='category.name', read_only=True)
+
+    class Meta:
+        model  = LibraryBook
+        fields = ['id', 'title', 'description', 'category', 'category_name', 'pdf_file', 'created_at']
+        read_only_fields = ['created_at', 'category_name']
 
 
 class BrancheSerializer(serializers.ModelSerializer):
@@ -14,6 +37,7 @@ class BrancheSerializer(serializers.ModelSerializer):
             'id',
             'nom',
             'adresse',
+            'schedule_image',
             'total_inscrit',
             'total_suspendu',
             'total_en_attente'
@@ -86,16 +110,7 @@ class EmployeeSerializer(serializers.ModelSerializer):
         return None
 
     def create(self, validated_data):
-        employee = super().create(validated_data)
-
-        Utilisateur.objects.create(
-            phone=employee.phone,
-            role=employee.job,  # associer au job comme role
-            first_name=employee.full_name,  # pour cohérence
-            password=employee.phone  # mot de passe par défaut
-        )
-
-        return employee
+        return super().create(validated_data)
 
 class ClasseSerializer(serializers.ModelSerializer):
     employees = EmployeeSerializer(many=True, read_only=True)
@@ -544,7 +559,23 @@ class MyTokenObtainPairSerializer(TokenObtainPairSerializer):
         return token
 
     def validate(self, attrs):
-        data = super().validate(attrs)
+        # Check if the account belongs to a dismissed employee BEFORE authenticating
+        phone = attrs.get('phone') or attrs.get(self.username_field, '')
+        if phone:
+            # Check via OneToOne link OR by matching phone in Employee table
+            dismissed = (
+                Employee.objects.filter(user__phone=phone, is_actif=False).exists() or
+                Employee.objects.filter(phone=phone, is_actif=False).exists()
+            )
+            if dismissed:
+                raise JWTAuthFailed("لا يمكنك تسجيل الدخول: تم إيقاف حسابك. تواصل مع الإدارة لإعادة التفعيل.")
+
+        try:
+            data = super().validate(attrs)
+        except JWTAuthFailed:
+            raise
+        except Exception:
+            raise JWTAuthFailed("رقم الهاتف أو كلمة المرور غير صحيحة")
 
         # Block agent login if they have no students or all students are suspended
         agent = getattr(self.user, 'agent_profile', None)

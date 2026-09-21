@@ -1,7 +1,7 @@
 from django.shortcuts import render
 from rest_framework import viewsets
 from rest_framework.response import Response
-from .models import Branche, Classe, Niveau, Agent, Receipt, SalaryPayment, ReceiptPayment, PaiementTransations, Exam, AbsElmhdara, Job, Inscription, Garant, GarantPaiement, Employee, Transaction, Etudiant, Mois, Paiement, BankAccount, Receipt, ReceiptPayment, Utilisateur, Activity, AcademicYear, MonthlyReport, DailyAbsence, StudentFixedAbsence, AccountCategory, Account, Permission, Suspension, AbsenceActivity, Competition, Tasfiya, Juge, EvaluationResult, EvaluationPeriod, EvaluationMonthResult, Participant, Evaluation, CompetitionLevel, EtudiantCertified, QuarterlyReport, Attestation, ExitCertificate, DeliveryReceipt, DeliveryPeriod, PushSubscription, TehejiReport, StudentClassHistory
+from .models import SchoolNotification, LibraryCategory, LibraryBook, Branche, Classe, Niveau, Agent, Receipt, SalaryPayment, ReceiptPayment, PaiementTransations, Exam, AbsElmhdara, Job, Inscription, Garant, GarantPaiement, Employee, Transaction, Etudiant, Mois, Paiement, BankAccount, Receipt, ReceiptPayment, Utilisateur, Activity, AcademicYear, MonthlyReport, DailyAbsence, StudentFixedAbsence, AccountCategory, Account, Permission, Suspension, AbsenceActivity, Competition, Tasfiya, Juge, EvaluationResult, EvaluationPeriod, EvaluationMonthResult, Participant, Evaluation, CompetitionLevel, EtudiantCertified, QuarterlyReport, Attestation, ExitCertificate, DeliveryReceipt, DeliveryPeriod, PushSubscription, TehejiReport, StudentClassHistory
 from .serializers import *
 from rest_framework_simplejwt.views import TokenObtainPairView
 from django.db import transaction
@@ -33,6 +33,7 @@ from rest_framework import filters
 from django.db import transaction as db_transaction
 from .filters import UtilisateurFilter
 from rest_framework.permissions import AllowAny
+from rest_framework import parsers
 import django_filters
 from django.db import models
 
@@ -198,6 +199,41 @@ def get_cumulative_income(report, last_income):
 
     return (ahzab * 8) + thmn
 
+class SchoolNotificationViewSet(viewsets.ModelViewSet):
+    queryset = SchoolNotification.objects.all()
+    serializer_class = SchoolNotificationSerializer
+    parser_classes = [parsers.MultiPartParser, parsers.FormParser, parsers.JSONParser]
+
+    @action(detail=False, methods=['get'], url_path='today')
+    def today(self, request):
+        from datetime import date
+        today = date.today()
+        qs = SchoolNotification.objects.filter(is_active=True)
+        # instant: show on the day they were created
+        instant = qs.filter(notification_type='instant', created_at__date=today)
+        # monthly_day: show every month on that day number
+        monthly = qs.filter(notification_type='monthly_day', day_of_month=today.day)
+        combined = (instant | monthly).distinct()
+        return Response(self.get_serializer(combined, many=True).data)
+
+
+class LibraryCategoryViewSet(viewsets.ModelViewSet):
+    queryset = LibraryCategory.objects.all()
+    serializer_class = LibraryCategorySerializer
+
+
+class LibraryBookViewSet(viewsets.ModelViewSet):
+    queryset = LibraryBook.objects.all()
+    serializer_class = LibraryBookSerializer
+    parser_classes = [parsers.MultiPartParser, parsers.FormParser, parsers.JSONParser]
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+
 class BrancheViewSet(viewsets.ModelViewSet):
     serializer_class = BrancheSerializer
     permission_classes = [IsAuthenticated]
@@ -226,6 +262,28 @@ class BrancheViewSet(viewsets.ModelViewSet):
         )
 
         return queryset
+
+    @action(detail=True, methods=['post'], url_path='upload-schedule')
+    def upload_schedule(self, request, pk=None):
+        branch = self.get_object()
+        image = request.FILES.get('image')
+        if not image:
+            return Response({'detail': 'لم يتم إرسال أي صورة'}, status=400)
+        if branch.schedule_image:
+            branch.schedule_image.delete(save=False)
+        branch.schedule_image = image
+        branch.save(update_fields=['schedule_image'])
+        serializer = self.get_serializer(branch)
+        return Response(serializer.data, status=200)
+
+    @action(detail=True, methods=['delete'], url_path='delete-schedule')
+    def delete_schedule(self, request, pk=None):
+        branch = self.get_object()
+        if branch.schedule_image:
+            branch.schedule_image.delete(save=False)
+            branch.schedule_image = None
+            branch.save(update_fields=['schedule_image'])
+        return Response({'detail': 'تم حذف الجدول'}, status=200)
 
 class ClasseViewSet(viewsets.ModelViewSet):
     queryset = Classe.objects.all()
@@ -673,7 +731,18 @@ class AccountViewSet(viewsets.ModelViewSet):
         from django.db.models import Sum, Case, When, Value, DecimalField
         from django.db.models.functions import Coalesce
 
+        date_from = request.query_params.get('date_from')
+        date_to   = request.query_params.get('date_to')
+
+        def apply_dates(qs):
+            if date_from:
+                qs = qs.filter(date__date__gte=date_from)
+            if date_to:
+                qs = qs.filter(date__date__lte=date_to)
+            return qs
+
         def compute(qs):
+            qs = apply_dates(qs)
             stats = qs.aggregate(
                 total_plus=Coalesce(
                     Sum(Case(When(type='plus', then='paid_amount'), default=Value(0), output_field=DecimalField())),
@@ -697,7 +766,18 @@ class AccountViewSet(viewsets.ModelViewSet):
         from django.db.models import Sum, Case, When, Value, DecimalField
         from django.db.models.functions import Coalesce
 
+        date_from = request.query_params.get('date_from')
+        date_to   = request.query_params.get('date_to')
+
+        def apply_dates(qs):
+            if date_from:
+                qs = qs.filter(date__date__gte=date_from)
+            if date_to:
+                qs = qs.filter(date__date__lte=date_to)
+            return qs
+
         def group(qs, group_field):
+            qs = apply_dates(qs)
             rows = qs.values(group_field).annotate(
                 total_plus=Coalesce(
                     Sum(Case(When(type='plus', then='paid_amount'), default=Value(0), output_field=DecimalField())),

@@ -57,9 +57,58 @@ class Job(models.Model):
     def __str__(self):
         return self.title      
 
+class SchoolNotification(models.Model):
+    TYPE_INSTANT = 'instant'
+    TYPE_MONTHLY = 'monthly_day'
+    TYPE_CHOICES = [
+        (TYPE_INSTANT, 'فوري'),
+        (TYPE_MONTHLY, 'يوم شهري'),
+    ]
+
+    title             = models.CharField(max_length=200)
+    body              = models.TextField(blank=True)
+    image             = models.ImageField(upload_to='notifications/', null=True, blank=True)
+    notification_type = models.CharField(max_length=20, choices=TYPE_CHOICES, default=TYPE_INSTANT)
+    # for monthly_day: which day of month (1-31)
+    day_of_month      = models.IntegerField(null=True, blank=True)
+    is_active         = models.BooleanField(default=True)
+    created_at        = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return self.title
+
+
+class LibraryCategory(models.Model):
+    name = models.CharField(max_length=100, unique=True)
+
+    class Meta:
+        ordering = ['name']
+
+    def __str__(self):
+        return self.name
+
+
+class LibraryBook(models.Model):
+    title       = models.CharField(max_length=200)
+    description = models.TextField(blank=True, null=True)
+    category    = models.ForeignKey(LibraryCategory, on_delete=models.SET_NULL, null=True, blank=True, related_name='books')
+    pdf_file    = models.FileField(upload_to='library/')
+    created_at  = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return self.title
+
+
 class Branche(models.Model):
     nom = models.CharField(max_length=100)
     adresse = models.TextField()
+    schedule_image = models.ImageField(upload_to='schedules/', null=True, blank=True)
 
     def __str__(self):
         return self.nom

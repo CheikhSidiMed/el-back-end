@@ -6,6 +6,9 @@ from rest_framework_simplejwt.views import TokenRefreshView
 router = DefaultRouter()
 
 router.register(r'branches', BrancheViewSet, basename="branche")
+router.register(r'school-notifications', SchoolNotificationViewSet, basename="school-notification")
+router.register(r'library-categories', LibraryCategoryViewSet, basename="library-category")
+router.register(r'library', LibraryBookViewSet, basename="library")
 router.register(r'classes', ClasseViewSet, basename="classe")
 router.register(r'levels', NiveauViewSet, basename="niveau")
 router.register(r'agents', AgentViewSet, basename="agent")
