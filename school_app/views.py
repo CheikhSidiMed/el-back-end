@@ -245,11 +245,17 @@ class BrancheViewSet(viewsets.ModelViewSet):
         if user.role and user.role.title == 'admin_g':
             queryset = Branche.objects.all()
 
-        elif hasattr(user, 'branches'):
+        elif hasattr(user, 'branches') and user.branches.exists():
             queryset = user.branches.all()
 
         elif hasattr(user, 'branche') and user.branche:
             queryset = Branche.objects.filter(id=user.branche.id)
+
+        elif getattr(user, 'agent_profile', None) is not None:
+            branch_ids = Etudiant.objects.filter(
+                agent=user.agent_profile, is_inscrire=1
+            ).values_list('branche_id', flat=True).distinct()
+            queryset = Branche.objects.filter(id__in=branch_ids)
 
         else:
             queryset = Branche.objects.none()
@@ -5055,8 +5061,13 @@ def unpaid_suspended(request):
                 due_amount = full_month_fee
 
             if payment:
-                paid_amount      = Decimal(payment['paid_amount'])
-                remaining_amount = due_amount - paid_amount
+                paid_amount = Decimal(payment['paid_amount'])
+                if is_registration_month or is_suspend_month:
+                    # Prorated months: recalculate from prorated due_amount
+                    remaining_amount = due_amount - paid_amount
+                else:
+                    # Regular months: trust the stored remaining_amount (mirrors student_payments)
+                    remaining_amount = Decimal(payment['remaining_amount'])
                 if remaining_amount < 0:
                     remaining_amount = Decimal("0.00")
             else:
