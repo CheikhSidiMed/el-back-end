@@ -198,8 +198,9 @@ class Niveau(models.Model):
         return self.level_name
 
 class Agent(models.Model):
+    # phone stored as-is (may include 00222 prefix); kept unique
     agent_name = models.CharField(max_length=100)
-    phone = models.CharField(max_length=20)
+    phone = models.CharField(max_length=20, unique=True)
     phone_2 = models.CharField(max_length=20, null=True, blank=True)
     profession = models.CharField(max_length=100, null=True, blank=True)
     whatsapp_phone = models.CharField(max_length=20, null=True, blank=True)

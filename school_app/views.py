@@ -415,11 +415,30 @@ class AgentViewSet(viewsets.ModelViewSet):
 class AgentPaginationViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = AgentSerializer
     pagination_class = AgentPagination
-    filter_backends = [filters.SearchFilter, DjangoFilterBackend]
-    search_fields = ['agent_name', 'phone', 'phone_2', 'whatsapp_phone', 'profession']
+    filter_backends = [DjangoFilterBackend]
 
     def get_queryset(self):
-        return Agent.objects.all().order_by('-id')
+        qs = Agent.objects.all().order_by('-id')
+        search = self.request.query_params.get('search', '').strip()
+        if search:
+            # Build variants: with and without 00222 prefix so user can search either way
+            variants = {search}
+            for prefix in ('00222', '222'):
+                if search.startswith(prefix):
+                    variants.add(search[len(prefix):])
+                else:
+                    variants.add(prefix + search)
+            q = Q()
+            for v in variants:
+                q |= (
+                    Q(agent_name__icontains=v) |
+                    Q(phone__icontains=v) |
+                    Q(phone_2__icontains=v) |
+                    Q(whatsapp_phone__icontains=v) |
+                    Q(profession__icontains=v)
+                )
+            qs = qs.filter(q)
+        return qs
 
 class AbsenceActivityViewSet(viewsets.ModelViewSet):
     queryset = AbsenceActivity.objects.all()
@@ -427,12 +446,22 @@ class AbsenceActivityViewSet(viewsets.ModelViewSet):
     filter_backends = [DjangoFilterBackend]
     filterset_fields = ['activity']
 
+def _phone_search_variants(term: str):
+    """Return a set of term variants with/without 00222 / 222 prefix."""
+    variants = {term}
+    for prefix in ('00222', '222'):
+        if term.startswith(prefix):
+            variants.add(term[len(prefix):])
+        else:
+            variants.add(prefix + term)
+    return variants
+
+
 class EtudiantViewSet(viewsets.ModelViewSet):
     queryset = Etudiant.objects.all()
     serializer_class = EtudiantSerializer
     pagination_class = EtudiantPagination
-    filter_backends = [DjangoFilterBackend, filters.SearchFilter]
-    search_fields = ['student_name', 'id', 'phone', 'agent__agent_name', 'agent__phone', 'agent__phone_2', 'agent__whatsapp_phone', 'classe__nom', 'branche__nom' ]
+    filter_backends = [DjangoFilterBackend]
     filterset_fields = ['agent_id', 'payment_nature', 'branche_id', 'etat']
 
     def get_queryset(self):
@@ -486,6 +515,23 @@ class EtudiantViewSet(viewsets.ModelViewSet):
                     queryset = queryset.filter(classe_id=int(classe_param))
             else:
                 queryset = queryset.filter(classe_id=int(classe_param))
+
+        search = self.request.query_params.get('search', '').strip()
+        if search:
+            q = Q()
+            for v in _phone_search_variants(search):
+                q |= (
+                    Q(student_name__icontains=v) |
+                    Q(phone__icontains=v) |
+                    Q(nni__icontains=v) |
+                    Q(agent__agent_name__icontains=v) |
+                    Q(agent__phone__icontains=v) |
+                    Q(agent__phone_2__icontains=v) |
+                    Q(agent__whatsapp_phone__icontains=v) |
+                    Q(classe__nom__icontains=v) |
+                    Q(branche__nom__icontains=v)
+                )
+            queryset = queryset.filter(q)
 
         return queryset.order_by('-id')
 
@@ -616,14 +662,17 @@ class EtudiantViewSet(viewsets.ModelViewSet):
 
             query = Q()
             for term in terms:
-                query &= (
-                    Q(student_name__icontains=term) |
-                    Q(phone__icontains=term) |
-                    Q(agent__agent_name__icontains=term) |
-                    Q(agent__phone__icontains=term) |
-                    Q(agent__phone_2__icontains=term) |
-                    Q(agent__whatsapp_phone__icontains=term)
-                )
+                term_q = Q()
+                for v in _phone_search_variants(term):
+                    term_q |= (
+                        Q(student_name__icontains=v) |
+                        Q(phone__icontains=v) |
+                        Q(agent__agent_name__icontains=v) |
+                        Q(agent__phone__icontains=v) |
+                        Q(agent__phone_2__icontains=v) |
+                        Q(agent__whatsapp_phone__icontains=v)
+                    )
+                query &= term_q
 
             queryset = queryset.filter(query)
 
