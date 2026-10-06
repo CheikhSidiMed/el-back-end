@@ -485,6 +485,7 @@ class DailyAbsence(models.Model):
 
     justified_absence = models.BooleanField(default=False)
     remark = models.TextField(blank=True, null=True)
+    agent_response = models.TextField(blank=True, null=True)
 
     class Meta:
         unique_together = ['student', 'date', 'session']

@@ -487,7 +487,7 @@ class EtudiantViewSet(viewsets.ModelViewSet):
             else:
                 queryset = queryset.filter(classe_id=int(classe_param))
 
-        return queryset
+        return queryset.order_by('-id')
 
     @transaction.atomic
     def create(self, request, *args, **kwargs):
@@ -3408,6 +3408,7 @@ class AgentPortalViewSet(viewsets.ViewSet):
                 'session': a.session,
                 'justified': a.justified_absence,
                 'remark': a.remark or '',
+                'agent_response': a.agent_response or '',
             })
 
         # Suspended students (suspended in last 30 days)
@@ -3432,6 +3433,26 @@ class AgentPortalViewSet(viewsets.ViewSet):
         # Sort all by date desc
         data.sort(key=lambda x: x['date'], reverse=True)
         return Response(data)
+
+    @action(detail=False, methods=['patch'], url_path=r'absence-respond/(?P<absence_id>\d+)')
+    def absence_respond(self, request, absence_id=None):
+        agent = self._get_agent(request)
+        if not agent:
+            return Response({'detail': 'Not an agent account.'}, status=403)
+
+        try:
+            absence = DailyAbsence.objects.select_related('student__agent').get(pk=absence_id)
+        except DailyAbsence.DoesNotExist:
+            return Response({'detail': 'Not found.'}, status=404)
+
+        if absence.student.agent_id != agent.id:
+            return Response({'detail': 'Forbidden.'}, status=403)
+
+        response_text = request.data.get('agent_response', '').strip()
+        absence.agent_response = response_text
+        absence.save(update_fields=['agent_response'])
+
+        return Response({'id': absence.id, 'agent_response': absence.agent_response})
 
 
 class AttestationViewSet(viewsets.ModelViewSet):
@@ -3663,8 +3684,18 @@ def student_payments(request):
         # ---------------------------
         elif calendar_year == registration_year:
             if month < registration_date.month:
-                due_amount = paid_amount = remaining_amount = Decimal("0.00")
-                status, status_bool = "paid", True
+                # A Paiement record may exist here for a reactivated student's suspension month
+                if payment:
+                    remaining_amount = Decimal(payment['remaining_amount'])
+                    paid_amount      = Decimal(payment['paid_amount'])
+                    due_amount       = paid_amount + remaining_amount
+                    if remaining_amount > 0:
+                        status, status_bool = ("partial" if paid_amount > 0 else "unpaid"), False
+                    else:
+                        status, status_bool = "paid", True
+                else:
+                    due_amount = paid_amount = remaining_amount = Decimal("0.00")
+                    status, status_bool = "paid", True
             elif month == registration_date.month:
                 days_in_month = monthrange(calendar_year, month)[1]
                 proportion = Decimal(days_in_month - registration_date.day + 1) / Decimal(days_in_month)

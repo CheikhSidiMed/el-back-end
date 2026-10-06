@@ -280,7 +280,7 @@ class DailyAbsenceDetailSerializer(serializers.ModelSerializer):
     class Meta:
         model = DailyAbsence
         fields = ['id', 'student', 'student_name', 'classe_nom', 'branche_nom',
-                  'agent_phone', 'date', 'session', 'justified_absence', 'remark', 'currentYear']
+                  'agent_phone', 'date', 'session', 'justified_absence', 'remark', 'agent_response', 'currentYear']
 
     def get_agent_phone(self, obj):
         if obj.student and obj.student.agent:

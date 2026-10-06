@@ -16,6 +16,9 @@ fData = create_perm('fData', 'البيانات')
 create_perm('fStudents', 'الطلاب', fData)
 create_perm('fAgents', 'الوكلاء، الفروع و الاقسام', fData)
 create_perm('fActivities', 'الدورات والأنشطة', fData)
+create_perm('fSchedule', 'الجدول الدراسي', fData)
+create_perm('fLibrary', 'المكتبة الإلكترونية', fData)
+create_perm('fNotifications', 'الإشعارات', fData)
 
 # شؤون الطلاب
 fStudentAffairs = create_perm('fStudentAffairs', 'شؤون الطلاب')
