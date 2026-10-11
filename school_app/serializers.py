@@ -30,6 +30,12 @@ class BrancheSerializer(serializers.ModelSerializer):
     total_inscrit = serializers.IntegerField(read_only=True)
     total_suspendu = serializers.IntegerField(read_only=True)
     total_en_attente = serializers.IntegerField(read_only=True)
+    schedule_image = serializers.SerializerMethodField()
+
+    def get_schedule_image(self, obj):
+        if obj.schedule_image:
+            return str(obj.schedule_image)  # relative path: 'schedules/filename.jpg'
+        return None
 
     class Meta:
         model = Branche
