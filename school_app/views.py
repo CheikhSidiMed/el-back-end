@@ -319,6 +319,14 @@ class ClasseViewSet(viewsets.ModelViewSet):
 
         return queryset
 
+    def perform_update(self, serializer):
+        old_branche_id = serializer.instance.branche_id
+        instance = serializer.save()
+        new_branche_id = instance.branche_id
+        # If branch changed, move all students in this class to the new branch
+        if old_branche_id and new_branche_id and old_branche_id != new_branche_id:
+            instance.etudiants.all().update(branche_id=new_branche_id)
+
 class ExamViewSet(viewsets.ModelViewSet):
     queryset = Exam.objects.all()
     serializer_class = ExamSerializer
@@ -382,11 +390,18 @@ class AgentViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'], url_path='create-account')
     def create_account(self, request, pk=None):
         agent = self.get_object()
-        if hasattr(agent, 'user_account') and agent.user_account is not None:
-            return Response({'detail': 'الحساب موجود مسبقاً', 'phone': agent.user_account.phone}, status=200)
+
+        # If agent already has a linked account, return it
+        try:
+            linked = agent.user_account
+            return Response({'detail': 'الحساب موجود مسبقاً', 'phone': linked.phone}, status=200)
+        except Exception:
+            pass
+
         raw_phone = agent.phone or ''
+        # Strip any leading + or spaces
+        phone = raw_phone.strip().lstrip('+')
         # Strip Mauritanian country code prefix so login uses local 8-digit number
-        phone = raw_phone.lstrip('+')
         for prefix in ('00222', '222'):
             if phone.startswith(prefix):
                 phone = phone[len(prefix):]
@@ -394,9 +409,25 @@ class AgentViewSet(viewsets.ModelViewSet):
         phone = phone.strip()
         if not phone:
             return Response({'detail': 'لا يوجد رقم هاتف للوكيل'}, status=400)
-        if Utilisateur.objects.filter(phone=phone).exists():
-            return Response({'detail': 'يوجد مستخدم بهذا الرقم بالفعل'}, status=400)
+
         agent_role, _ = Job.objects.get_or_create(title='agent', defaults={'description': 'وكيل'})
+
+        # Search by stripped phone OR by full stored phone (defensive)
+        existing_user = Utilisateur.objects.filter(phone=phone).first()
+        if not existing_user:
+            existing_user = Utilisateur.objects.filter(phone=raw_phone.strip()).first()
+
+        if existing_user:
+            # User already exists — link agent profile and add agent role to extra_roles
+            existing_user.agent_profile = agent
+            if existing_user.role is None:
+                existing_user.role = agent_role
+            else:
+                existing_user.extra_roles.add(agent_role)
+            existing_user.save()
+            return Response({'detail': 'تم ربط الحساب الموجود بالوكيل وإضافة دور الوكيل', 'phone': phone}, status=200)
+
+        # No existing user — create a fresh account using the stripped (local) phone
         user = Utilisateur.objects.create_user(phone=phone, password=phone)
         user.first_name = agent.agent_name
         user.role = agent_role
@@ -532,6 +563,16 @@ class EtudiantViewSet(viewsets.ModelViewSet):
                     Q(branche__nom__icontains=v)
                 )
             queryset = queryset.filter(q)
+            # Prioritise names that START WITH the term over those that only contain it
+            from django.db.models import Case, When, IntegerField as _Int
+            queryset = queryset.annotate(
+                _name_prio=Case(
+                    When(student_name__istartswith=search, then=0),
+                    default=1,
+                    output_field=_Int(),
+                )
+            ).order_by('_name_prio', '-id')
+            return queryset
 
         return queryset.order_by('-id')
 
@@ -3843,7 +3884,7 @@ def student_by_level(request):
         .filter(level_id=level_id, is_inscrire=1, etat='inscrit')
         .select_related('level', 'agent')
         .prefetch_related(Prefetch('monthlyreport_set', queryset=reports_qs, to_attr='_prefetched_reports'))
-        .only('id', 'student_name', 'part_count', 'fees', 'date_inscription', 'level_id', 'agent_id')
+        .only('id', 'student_name', 'part_count', 'fees', 'date_count', 'level_id', 'agent_id')
     )
 
     serializer = EtudiantLightSerializer(students, many=True)
@@ -5361,16 +5402,15 @@ def reactivate_student(request, student_id):
             request.data.get('reactivation_date', date.today().isoformat())
         )
 
-        # 🔹 Essayer de récupérer la suspension active
-        try:
-            suspension = Suspension.objects.get(student=student, status='active')
+        # 🔹 Essayer de récupérer la suspension active (prendre la plus récente si plusieurs)
+        suspension = Suspension.objects.filter(student=student, status='active').order_by('-id').first()
+        if suspension:
             unpaid_months = suspension.unpaid_months_data or []
             monthly_fee = suspension.monthly_fee or 0
             suspension_exists = True
-        except Suspension.DoesNotExist:
-            suspension = None
+        else:
             unpaid_months = []
-            monthly_fee = request.data.get('month_fee', 0)  # Optionnel si tu veux calculer les paiements
+            monthly_fee = request.data.get('month_fee', 0)
             suspension_exists = False
 
         created_count = 0
@@ -5406,7 +5446,7 @@ def reactivate_student(request, student_id):
             created_count += 1
 
         # =====================================================
-        # 2️⃣ Mettre à jour la suspension si existait
+        # 2️⃣ Mettre à jour toutes les suspensions actives
         # =====================================================
         if suspension_exists:
             suspension.status = 'completed'
@@ -5415,6 +5455,11 @@ def reactivate_student(request, student_id):
                 'reason', 'إعادة تنشيط الطالب'
             )
             suspension.save()
+            # Close any other duplicate active suspensions
+            Suspension.objects.filter(student=student, status='active').update(
+                status='completed',
+                reactivation_date=reactivation_date,
+            )
 
         # =====================================================
         # 3️⃣ Mettre à jour l'étudiant

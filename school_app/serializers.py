@@ -187,7 +187,7 @@ class EtudiantLightSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Etudiant
-        fields = ['id', 'student_name', 'part_count', 'fees', 'remaining', 'date_inscription',
+        fields = ['id', 'student_name', 'part_count', 'fees', 'remaining', 'date_count',
                   'level_name', 'level_price', 'agent_name', 'last_ahzab']
 
     def get_last_ahzab(self, obj):
@@ -490,6 +490,16 @@ class UtilisateurSerializer(serializers.ModelSerializer):
         required=False
     )
 
+    extra_roles = JobSerializer(many=True, read_only=True)
+
+    extra_role_ids = serializers.PrimaryKeyRelatedField(
+        queryset=Job.objects.all(),
+        many=True,
+        write_only=True,
+        source='extra_roles',
+        required=False
+    )
+
     class Meta:
         model = Utilisateur
         fields = [
@@ -499,6 +509,8 @@ class UtilisateurSerializer(serializers.ModelSerializer):
             'password',
             'role',
             'role_id',
+            'extra_roles',
+            'extra_role_ids',
             'classe',
             'branches',
             'branch_ids',
@@ -511,6 +523,7 @@ class UtilisateurSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         branches = validated_data.pop('branches', [])
+        extra_roles = validated_data.pop('extra_roles', [])
         password = validated_data.pop('password', None)
 
         user = Utilisateur(**validated_data)
@@ -520,11 +533,14 @@ class UtilisateurSerializer(serializers.ModelSerializer):
 
         if branches:
             user.branches.set(branches)
+        if extra_roles is not None:
+            user.extra_roles.set(extra_roles)
 
         return user
 
     def update(self, instance, validated_data):
         branches = validated_data.pop('branches', None)
+        extra_roles = validated_data.pop('extra_roles', None)
         password = validated_data.pop('password', None)
 
         for attr, value in validated_data.items():
@@ -537,6 +553,8 @@ class UtilisateurSerializer(serializers.ModelSerializer):
 
         if branches is not None:
             instance.branches.set(branches)
+        if extra_roles is not None:
+            instance.extra_roles.set(extra_roles)
 
         return instance
 
@@ -600,6 +618,37 @@ class MyTokenObtainPairSerializer(TokenObtainPairSerializer):
         data['user'] = UtilisateurSerializer(self.user).data
         data['user']['agent_profile_id'] = self.user.agent_profile_id
         data['user']['must_change_password'] = self.user.must_change_password
+
+        # Build available_roles list
+        role_labels = dict(Job.ROLES)
+        available_roles = []
+        if self.user.role:
+            available_roles.append({
+                'id': self.user.role.id,
+                'title': self.user.role.title,
+                'label': role_labels.get(self.user.role.title, self.user.role.title),
+                'type': 'staff',
+            })
+        for extra in self.user.extra_roles.all():
+            if not any(r['title'] == extra.title for r in available_roles):
+                available_roles.append({
+                    'id': extra.id,
+                    'title': extra.title,
+                    'label': role_labels.get(extra.title, extra.title),
+                    'type': 'agent' if extra.title == 'agent' else 'staff',
+                })
+        # If user has an agent_profile but no agent role listed yet, add it
+        if self.user.agent_profile_id and not any(r['title'] == 'agent' for r in available_roles):
+            agent_job = Job.objects.filter(title='agent').first()
+            available_roles.append({
+                'id': agent_job.id if agent_job else None,
+                'title': 'agent',
+                'label': 'وكيل',
+                'type': 'agent',
+            })
+
+        data['available_roles'] = available_roles
+        data['requires_role_selection'] = len(available_roles) > 1
         return data
 
 class AcademicYearSerializer(serializers.ModelSerializer):

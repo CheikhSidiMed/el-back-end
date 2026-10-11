@@ -149,6 +149,7 @@ class Utilisateur(AbstractUser):
         null=True, blank=True,
         related_name='utilisateur'
     )
+    extra_roles = models.ManyToManyField('Job', blank=True, related_name='extra_users')
     branches = models.ManyToManyField(Branche, blank=True)
     classe = models.ForeignKey('Classe', on_delete=models.SET_NULL, null=True, blank=True, related_name='user_class')
     phone = models.CharField(max_length=15, unique=True, null=True, blank=True)
@@ -240,6 +241,7 @@ class Etudiant(models.Model):
         choices=[('free', 'Gratuit'), ('mensuel', 'Mensuel')],
         default='mensuel'
     )
+    free_reason = models.CharField(max_length=255, null=True, blank=True, verbose_name='سبب الإعفاء')
 
     fees = models.DecimalField(max_digits=8, decimal_places=2, default=0)
     discount = models.DecimalField(max_digits=8, decimal_places=2, default=0)
@@ -920,16 +922,18 @@ class Receipt(models.Model):
         from django.utils import timezone as tz
         from django.db import transaction as db_transaction
         today = tz.localdate()
-        prefix = str(today.day) + str(today.month).zfill(2) + str(today.year % 100).zfill(2)
-        lo = int(prefix + '0000')
-        hi = int(prefix + '9999')
+        yy = str(today.year % 100).zfill(2)             # "26"
+        ddd = str(today.timetuple().tm_yday).zfill(3)   # "284"
+        prefix = yy + ddd                               # "26284"
+        lo = int(prefix + '000')                         # 26284000
+        hi = int(prefix + '999')                         # 26284999
         with db_transaction.atomic():
             last = Receipt.objects.filter(
                 receipt_id__gte=lo,
                 receipt_id__lte=hi
             ).select_for_update().order_by('-receipt_id').first()
-            counter = (last.receipt_id % 10000) + 1 if last else 1
-        return int(prefix + str(counter).zfill(4))
+            counter = (last.receipt_id % 1000) + 1 if last else 1
+        return int(prefix + str(counter).zfill(3))
 
 class ReceiptPayment(models.Model):
     receipt = models.ForeignKey(
