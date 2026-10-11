@@ -3697,6 +3697,23 @@ def daily_absence_list(request):
     return Response(serializer.data)
 
 
+def _inscription_month_proportion(reg_day, days_in_month):
+    """
+    day  1– 5 → full month (1)
+    day  6–24 → (days_in_month - day + 1) / days_in_month
+    day 25    → 5 / days_in_month
+    day 26+   → 0 (skip inscription month entirely)
+    """
+    if reg_day <= 5:
+        return Decimal("1")
+    elif reg_day <= 24:
+        return Decimal(days_in_month - reg_day + 1) / Decimal(days_in_month)
+    elif reg_day == 25:
+        return Decimal(5) / Decimal(days_in_month)
+    else:
+        return Decimal("0")
+
+
 @api_view(['GET'])
 def student_payments(request):
     student_id = request.GET.get('student_id')
@@ -3788,7 +3805,7 @@ def student_payments(request):
                     status, status_bool = "paid", True
             elif month == registration_date.month:
                 days_in_month = monthrange(calendar_year, month)[1]
-                proportion = Decimal(days_in_month - registration_date.day + 1) / Decimal(days_in_month)
+                proportion = _inscription_month_proportion(registration_date.day, days_in_month)
                 due_amount = (full_month_fee * proportion).quantize(Decimal("0.01"))
 
                 if payment:
@@ -4221,7 +4238,7 @@ def unpaid_months_until_suspend(request):
                         paid_amount      = Decimal("0.00")
                         remaining_amount = due_amount
                 elif is_registration_month:
-                    proportion = Decimal(days_in_month - registration_date.day + 1) / Decimal(days_in_month)
+                    proportion = _inscription_month_proportion(registration_date.day, days_in_month)
                     due_amount = (full_month_fee * proportion).quantize(Decimal("0.01"))
                     if payment:
                         paid_amount      = Decimal(payment['paid_amount'])
@@ -4689,8 +4706,8 @@ def unpaid_students(request):
         start_date = max(student.date_inscription, academic_year.start_date)
         end_date = min(today, academic_year.end_date)
 
-        # Si inscription après le 15, commencer le mois suivant
-        if start_date.day > 15:
+        # Si inscription après le 25, commencer le mois suivant
+        if start_date.day >= 26:
             if start_date.month == 12:
                 current = date(start_date.year + 1, 1, 1)
             else:
@@ -4722,7 +4739,7 @@ def unpaid_students(request):
                 )
                 if is_registration_month:
                     days_in_month = monthrange(current.year, current.month)[1]
-                    proportion = Decimal(days_in_month - student.date_inscription.day + 1) / Decimal(days_in_month)
+                    proportion = _inscription_month_proportion(student.date_inscription.day, days_in_month)
                     month_remaining = (full_month_fee * proportion).quantize(Decimal("0.01"))
                 else:
                     month_remaining = full_month_fee
@@ -4807,8 +4824,8 @@ def unpaid_students_not_have_agent(request):
         start_date = max(student.date_inscription, academic_year.start_date)
         end_date = min(today, academic_year.end_date)
 
-        # Commencer le calcul du mois suivant si inscription après le 15
-        if start_date.day > 15:
+        # Commencer le calcul du mois suivant si inscription après le 25
+        if start_date.day >= 26:
             if start_date.month == 12:
                 current = date(start_date.year + 1, 1, 1)
             else:
@@ -4843,7 +4860,7 @@ def unpaid_students_not_have_agent(request):
                 )
                 if is_registration_month:
                     days_in_month = monthrange(current.year, current.month)[1]
-                    proportion = Decimal(days_in_month - student.date_inscription.day + 1) / Decimal(days_in_month)
+                    proportion = _inscription_month_proportion(student.date_inscription.day, days_in_month)
                     month_remaining = (full_month_fee * proportion).quantize(Decimal("0.01"))
                 else:
                     month_remaining = full_month_fee
@@ -4934,8 +4951,8 @@ def unpaid_by_agent(request):
         start_date = max(student.date_inscription, academic_year.start_date)
         end_date = min(today, academic_year.end_date)
 
-        # Commencer à calculer à partir du mois suivant si inscription après le 15
-        if start_date.day > 15:
+        # Commencer à calculer à partir du mois suivant si inscription après le 25
+        if start_date.day >= 26:
             if start_date.month == 12:
                 current = date(start_date.year + 1, 1, 1)
             else:
@@ -4969,7 +4986,7 @@ def unpaid_by_agent(request):
                 )
                 if is_registration_month:
                     days_in_month = monthrange(current.year, current.month)[1]
-                    proportion = Decimal(days_in_month - student.date_inscription.day + 1) / Decimal(days_in_month)
+                    proportion = _inscription_month_proportion(student.date_inscription.day, days_in_month)
                     month_remaining = (full_month_fee * proportion).quantize(Decimal("0.01"))
                 else:
                     month_remaining = full_month_fee
@@ -5173,7 +5190,7 @@ def unpaid_suspended(request):
                 proportion  = Decimal(days_to_pay) / Decimal(days_in_month)
                 due_amount  = (full_month_fee * proportion).quantize(Decimal("0.01"))
             elif is_registration_month:
-                proportion = Decimal(days_in_month - registration_date.day + 1) / Decimal(days_in_month)
+                proportion = _inscription_month_proportion(registration_date.day, days_in_month)
                 due_amount = (full_month_fee * proportion).quantize(Decimal("0.01"))
             elif is_suspend_month:
                 proportion = Decimal(suspend_date.day) / Decimal(days_in_month)
