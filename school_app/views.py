@@ -4610,7 +4610,7 @@ def filter_transactions_account(request):
         return Response({"error": "Both start_date and end_date are required"}, status=400)
 
     # ---- Transactions dans l'intervalle ----
-    transactions = Transaction.objects.filter(
+    transactions = Transaction.objects.select_related('bank').filter(
         date__date__gte=start_date,
         date__date__lte=end_date
     ).order_by("date")
@@ -4627,14 +4627,14 @@ def filter_transactions_account(request):
     # Pin opening-balance transaction first (always visible regardless of date filter)
     opening_txns = []
     if account_id:
-        opening_qs = Transaction.objects.filter(
+        opening_qs = Transaction.objects.select_related('bank').filter(
             account_id=account_id,
             description='الرصيد الافتتاحي'
         ).exclude(id__in=transactions.values_list('id', flat=True))
         opening_txns = list(opening_qs)
 
     all_txns = opening_txns + list(transactions)
-    serializer = TransactionSerializer(all_txns, many=True)
+    serializer = TransactionPreviewSerializer(all_txns, many=True)
 
     # ---- Totaux période ----
     total_plus = transactions.filter(type="plus").aggregate(s=Sum("paid_amount"))["s"] or 0

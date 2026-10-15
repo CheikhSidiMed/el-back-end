@@ -846,6 +846,20 @@ class Transaction(models.Model):
 
     class Meta:
         ordering = ['id']
+        indexes = [
+            # preview/filter: date range + bank_id
+            models.Index(fields=['bank_id', 'date'], name='tx_bank_date_idx'),
+            # preview/filter: date range + account_id
+            models.Index(fields=['account_id', 'date'], name='tx_account_date_idx'),
+            # preview/filter: date range + employee_id
+            models.Index(fields=['employee_id', 'date'], name='tx_employee_date_idx'),
+            # per-totals: bank group + type + paid_amount
+            models.Index(fields=['bank_id', 'type'], name='tx_bank_type_idx'),
+            # per-totals: account group + type
+            models.Index(fields=['account_id', 'type'], name='tx_account_type_idx'),
+            # plain date range scans
+            models.Index(fields=['date'], name='tx_date_idx'),
+        ]
 
     def __str__(self):
         return f"Transaction {self.id} - {self.paid_amount}"

@@ -294,6 +294,13 @@ class DailyAbsenceDetailSerializer(serializers.ModelSerializer):
         return None
 
 class BankAccountSerializer(serializers.ModelSerializer):
+    user_detail = serializers.SerializerMethodField(read_only=True)
+
+    def get_user_detail(self, obj):
+        if obj.user:
+            return {'id': obj.user.id, 'first_name': obj.user.first_name, 'username': obj.user.username}
+        return None
+
     class Meta:
         model = BankAccount
         fields = '__all__'
@@ -414,6 +421,20 @@ class GarantSerializer(serializers.ModelSerializer):
     class Meta:
         model = Garant
         fields = '__all__'
+
+class TransactionPreviewSerializer(serializers.ModelSerializer):
+    """Lightweight serializer for preview/filter — only fields shown in the table."""
+    bank = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Transaction
+        fields = ['id', 'date', 'description', 'type', 'paid_amount', 'bank']
+
+    def get_bank(self, obj):
+        if obj.bank_id is None:
+            return None
+        return {'id': obj.bank_id, 'bank_name': obj.bank.bank_name}
+
 
 class TransactionSerializer(serializers.ModelSerializer):
     bank = BankAccountSerializer(read_only=True)
@@ -601,9 +622,16 @@ class MyTokenObtainPairSerializer(TokenObtainPairSerializer):
         except Exception:
             raise JWTAuthFailed("رقم الهاتف أو كلمة المرور غير صحيحة")
 
-        # Block agent login if they have no students or all students are suspended
+        # Block agent login if they have no students or all students are suspended.
+        # Skip this check for users who also hold an admin/staff role.
+        ADMIN_ROLES = {'admin_g', 'admin', 'supervisor', 'employee', 'teacher'}
+        user_role_title = self.user.role.title if self.user.role else None
+        extra_role_titles = set(self.user.extra_roles.values_list('title', flat=True))
+        all_role_titles = ({user_role_title} if user_role_title else set()) | extra_role_titles
+        is_admin_or_staff = bool(all_role_titles & ADMIN_ROLES)
+
         agent = getattr(self.user, 'agent_profile', None)
-        if agent is not None:
+        if agent is not None and not is_admin_or_staff:
             students = Etudiant.objects.filter(agent=agent)
             if not students.exists():
                 raise serializers.ValidationError(
@@ -628,6 +656,8 @@ class MyTokenObtainPairSerializer(TokenObtainPairSerializer):
                 'title': self.user.role.title,
                 'label': role_labels.get(self.user.role.title, self.user.role.title),
                 'type': 'staff',
+                'disabled': False,
+                'disabled_reason': None,
             })
         for extra in self.user.extra_roles.all():
             if not any(r['title'] == extra.title for r in available_roles):
@@ -636,6 +666,8 @@ class MyTokenObtainPairSerializer(TokenObtainPairSerializer):
                     'title': extra.title,
                     'label': role_labels.get(extra.title, extra.title),
                     'type': 'agent' if extra.title == 'agent' else 'staff',
+                    'disabled': False,
+                    'disabled_reason': None,
                 })
         # If user has an agent_profile but no agent role listed yet, add it
         if self.user.agent_profile_id and not any(r['title'] == 'agent' for r in available_roles):
@@ -645,7 +677,24 @@ class MyTokenObtainPairSerializer(TokenObtainPairSerializer):
                 'title': 'agent',
                 'label': 'وكيل',
                 'type': 'agent',
+                'disabled': False,
+                'disabled_reason': None,
             })
+
+        # Mark agent role as disabled if agent has no active (non-suspended) students
+        agent_profile = getattr(self.user, 'agent_profile', None)
+        if agent_profile is not None:
+            students = Etudiant.objects.filter(agent=agent_profile)
+            if not students.exists():
+                disabled_reason = 'لا يوجد طلاب مسجلون باسمك'
+            elif not students.exclude(etat='suspendu').exists():
+                disabled_reason = 'جميع طلابك موقوفون'
+            else:
+                disabled_reason = None
+            for r in available_roles:
+                if r['type'] == 'agent':
+                    r['disabled'] = disabled_reason is not None
+                    r['disabled_reason'] = disabled_reason
 
         data['available_roles'] = available_roles
         data['requires_role_selection'] = len(available_roles) > 1
@@ -654,7 +703,7 @@ class MyTokenObtainPairSerializer(TokenObtainPairSerializer):
 class AcademicYearSerializer(serializers.ModelSerializer):
     class Meta:
         model  = AcademicYear
-        fields = ("id", "year", "name", "start_date", "end_date")
+        fields = ("id", "year", "name", "start_date", "end_date", "is_active")
 
 class PaiementSerializer(serializers.ModelSerializer):
     agent = AgentSerializer(read_only=True)
