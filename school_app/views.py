@@ -2770,6 +2770,13 @@ class UtilisateurViewSet(viewsets.ModelViewSet):
 class MyTokenObtainPairView(TokenObtainPairView):
     serializer_class = MyTokenObtainPairSerializer
 
+    def post(self, request, *args, **kwargs):
+        response = super().post(request, *args, **kwargs)
+        response['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+        response['Pragma'] = 'no-cache'
+        response['Age'] = '0'
+        return response
+
 class AcademicYearViewSet(viewsets.ModelViewSet):
     """Full CRUD for AcademicYear (list, retrieve, create, update, delete)."""
     queryset         = AcademicYear.objects.all()
