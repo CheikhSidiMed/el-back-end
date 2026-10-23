@@ -574,6 +574,9 @@ class EtudiantViewSet(viewsets.ModelViewSet):
             ).order_by('_name_prio', '-id')
             return queryset
 
+        ordering = self.request.query_params.get('ordering', None)
+        if ordering == 'id':
+            return queryset.order_by('id')
         return queryset.order_by('-id')
 
     @transaction.atomic
@@ -3756,7 +3759,10 @@ def student_payments(request):
 
     result = []
 
-    for month in range(1, 13):
+    # Academic year order: start_month first (e.g. 10,11,12,1,2,...,9)
+    month_order = list(range(start_month, 13)) + list(range(1, start_month))
+
+    for month in month_order:
         payment = payments_dict.get(month)
 
         # Compute the actual calendar year for this month within the academic year.
@@ -4345,8 +4351,11 @@ def garant_payments(request):
 
     payments_dict = {p['month']: p for p in payments}
 
+    start_month = academic_year.start_date.month
+    month_order = list(range(start_month, 13)) + list(range(1, start_month))
+
     result = []
-    for month in range(1, 12 + 1):
+    for month in month_order:
 
         # Normal month
         due_amount = full_month_fee
