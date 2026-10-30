@@ -148,12 +148,17 @@ def get_previous_academic_year(year_str):
     except:
         return year_str
 
-#  Helper: previous month + academic year
+#  Helper: previous month + academic year (academic year starts in October)
 def get_previous_month_and_year(month, year):
     month_num = MONTHS_AR_REVERSE.get(month)
 
+    # October is the first month of the academic year → prev is September of previous year
+    if month_num == 10:
+        return MONTHS_AR[9], get_previous_academic_year(year)
+
+    # January → December is in the SAME academic year (not the previous one)
     if month_num == 1:
-        return MONTHS_AR[12], get_previous_academic_year(year)
+        return MONTHS_AR[12], year
 
     return MONTHS_AR[month_num - 1], year
 
@@ -606,6 +611,8 @@ class EtudiantViewSet(viewsets.ModelViewSet):
         old_fee = Decimal(str(instance.remaining))
         old_classe_id = instance.classe_id
         old_branche_id = instance.branche_id
+        old_payment_nature = instance.payment_nature
+        old_discount = instance.discount
 
         updated = serializer.save()
 
@@ -621,44 +628,64 @@ class EtudiantViewSet(viewsets.ModelViewSet):
         if updated.level_id != old_level_id and old_fee > 0:
             self._freeze_past_months_at_old_fee(updated, old_fee)
 
+        # When switching to free, freeze past months at the old fee so they remain owed
+        if updated.payment_nature == 'free' and old_payment_nature != 'free' and old_fee > 0:
+            self._freeze_past_months_at_old_fee(updated, old_fee)
+
+        # When discount changes, freeze past months at the old net fee
+        if updated.discount != old_discount and old_fee > 0:
+            self._freeze_past_months_at_old_fee(updated, old_fee)
+
         return updated
 
     def _freeze_past_months_at_old_fee(self, student, old_fee):
+        import datetime as dt_mod
         today = timezone.localdate()
-        # Find the active academic year
-        academic_year = AcademicYear.objects.filter(
-            start_date__lte=today, end_date__gte=today
-        ).first()
-        if not academic_year:
-            return
-
         inscription_date = student.date_inscription
         if not inscription_date:
             return
 
-        # Months range: from inscription month (if same year as start_date year) to last month
-        ay_start = academic_year.start_date
-        start_month = inscription_date.month if inscription_date >= ay_start else ay_start.month
-        end_month = today.month - 1  # don't touch current month
-        if end_month < start_month:
-            return
+        insc_month_start = dt_mod.date(inscription_date.year, inscription_date.month, 1)
+        cur_month_start  = dt_mod.date(today.year, today.month, 1)
 
-        for month in range(start_month, end_month + 1):
-            already_exists = Paiement.objects.filter(
-                etudiant=student,
-                academic_year=academic_year,
-                month=month
-            ).exists()
-            if not already_exists:
-                Paiement.objects.create(
+        # Process ALL academic years that started before today
+        for ay in AcademicYear.objects.filter(start_date__lte=today).order_by('start_date'):
+            ay_start = ay.start_date
+            sm = ay_start.month  # academic year start month (e.g. 10)
+            months_in_order = list(range(sm, 13)) + list(range(1, sm))
+
+            for month in months_in_order:
+                cal_year = ay_start.year if month >= sm else ay_start.year + 1
+                month_date = dt_mod.date(cal_year, month, 1)
+
+                if month_date < insc_month_start:
+                    continue  # before inscription — skip
+
+                if month_date >= cur_month_start:
+                    break  # current or future month — stop
+
+                already_exists = Paiement.objects.filter(
                     etudiant=student,
-                    academic_year=academic_year,
-                    month=month,
-                    due_amount=old_fee,
-                    paid_amount=Decimal('0.00'),
-                    remaining_amount=old_fee,
-                    user=None,
-                )
+                    academic_year=ay,
+                    month=month
+                ).exists()
+                if not already_exists:
+                    # Prorate inscription month
+                    if cal_year == inscription_date.year and month == inscription_date.month:
+                        days_in_month = monthrange(cal_year, month)[1]
+                        proportion = _inscription_month_proportion(inscription_date.day, days_in_month)
+                        due = (old_fee * proportion).quantize(Decimal("0.01"))
+                    else:
+                        due = old_fee
+                    Paiement.objects.create(
+                        etudiant=student,
+                        academic_year=ay,
+                        month=month,
+                        due_amount=due,
+                        paid_amount=Decimal('0.00'),
+                        remaining_amount=due,
+                        user=None,
+                    )
 
     def destroy(self, request, *args, **kwargs):
         student = self.get_object()
@@ -684,7 +711,6 @@ class EtudiantViewSet(viewsets.ModelViewSet):
         queryset = (
             Etudiant.objects
             .select_related('agent', 'classe', 'branche')  # مهم للأداء
-            .filter(is_active=True)
         )
 
         user = request.user
@@ -3817,14 +3843,15 @@ def student_payments(request):
                     due_amount = paid_amount = remaining_amount = Decimal("0.00")
                     status, status_bool = "paid", True
             elif month == registration_date.month:
-                days_in_month = monthrange(calendar_year, month)[1]
-                proportion = _inscription_month_proportion(registration_date.day, days_in_month)
-                due_amount = (full_month_fee * proportion).quantize(Decimal("0.01"))
-
                 if payment:
+                    # Use stored amounts — may have been frozen at a different fee
                     paid_amount = Decimal(payment['paid_amount'])
-                    remaining_amount = due_amount - paid_amount
+                    remaining_amount = Decimal(payment['remaining_amount']) if payment.get('remaining_amount') is not None else Decimal('0')
+                    due_amount = paid_amount + remaining_amount
                 else:
+                    days_in_month = monthrange(calendar_year, month)[1]
+                    proportion = _inscription_month_proportion(registration_date.day, days_in_month)
+                    due_amount = (full_month_fee * proportion).quantize(Decimal("0.01"))
                     paid_amount = Decimal("0.00")
                     remaining_amount = due_amount
 
@@ -3835,11 +3862,12 @@ def student_payments(request):
                 else:
                     status, status_bool = "unpaid", False
             else:
-                due_amount = full_month_fee
                 if payment:
                     paid_amount = Decimal(payment['paid_amount'])
-                    remaining_amount = Decimal(payment['remaining_amount']) if payment.get('remaining_amount') is not None else due_amount - paid_amount
+                    remaining_amount = Decimal(payment['remaining_amount']) if payment.get('remaining_amount') is not None else Decimal('0')
+                    due_amount = paid_amount + remaining_amount
                 else:
+                    due_amount = full_month_fee
                     paid_amount = Decimal("0.00")
                     remaining_amount = due_amount
 
@@ -3854,11 +3882,12 @@ def student_payments(request):
         # Mois après l'année d'inscription
         # ---------------------------
         else:
-            due_amount = full_month_fee
             if payment:
                 paid_amount = Decimal(payment['paid_amount'])
-                remaining_amount = Decimal(payment['remaining_amount']) if payment.get('remaining_amount') is not None else due_amount - paid_amount
+                remaining_amount = Decimal(payment['remaining_amount']) if payment.get('remaining_amount') is not None else Decimal('0')
+                due_amount = paid_amount + remaining_amount
             else:
+                due_amount = full_month_fee
                 paid_amount = Decimal("0.00")
                 remaining_amount = due_amount
 
@@ -4211,9 +4240,20 @@ def unpaid_months_until_suspend(request):
         ).values('month', 'paid_amount', 'remaining_amount')
         payments_dict = {p['month']: p for p in payments}
 
-        # Month window for this academic year
+        # Theoretical end of academic year based on start_month (e.g. Oct→Sep of next year)
+        ay_sm = academic_year.start_date.month
+        if ay_sm > 1:
+            ay_theo_end_m = ay_sm - 1
+            ay_theo_end_y = academic_year.start_date.year + 1
+        else:
+            ay_theo_end_m = 12
+            ay_theo_end_y = academic_year.start_date.year
+        ay_theo_end = date(ay_theo_end_y, ay_theo_end_m,
+                           monthrange(ay_theo_end_y, ay_theo_end_m)[1])
+
+        # Month window for this academic year — cap by theoretical end to prevent wrong-year attribution
         period_start = max(registration_date, academic_year.start_date)
-        period_end   = min(suspend_date, academic_year.end_date)
+        period_end   = min(suspend_date, academic_year.end_date, ay_theo_end)
 
         cursor = date(period_start.year, period_start.month, 1)
 
