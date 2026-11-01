@@ -2262,6 +2262,30 @@ class MonthlyReportViewSet(viewsets.ModelViewSet):
 
             data.append(item)
 
+        # =========================
+        # FALLBACK: no current-month reports yet → pre-fill from previous month
+        # This happens when opening a fresh month for the first time.
+        # =========================
+        if not data and prev_map:
+            for prev_report in prev_map.values():
+                student = prev_report.student
+                data.append({
+                    'id': None,
+                    'student': student.id,
+                    'student_name': student.student_name,
+                    'student_etat': student.etat,
+                    'month': month,
+                    'year': year,
+                    'previous_level': prev_report.current_level,
+                    'current_level': '',
+                    'memorization_amount': prev_report.memorization_amount,
+                    'ahzab': prev_report.ahzab,
+                    'thmn': prev_report.thmn,
+                    'progress': None,
+                    'absence': absence_map.get(student.id, 0),
+                    'remarks': '',
+                })
+
         return Response(data)
     
     @action(detail=False, methods=['post'], url_path='bulk-save')
