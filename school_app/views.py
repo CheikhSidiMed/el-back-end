@@ -2164,6 +2164,11 @@ class MonthlyReportViewSet(viewsets.ModelViewSet):
         month_num = MONTHS_AR_REVERSE.get(month)
         prev_month, prev_year = get_previous_month_and_year(month, year)
 
+        # Is this month already archived?
+        is_archived = MonthlyReport.objects.filter(
+            student__classe_id=classe_id, month=month, year=year, is_archived=True
+        ).exists()
+
         # =========================
         # BASE FILTER
         # =========================
@@ -2286,8 +2291,28 @@ class MonthlyReportViewSet(viewsets.ModelViewSet):
                     'remarks': '',
                 })
 
-        return Response(data)
-    
+        return Response({'reports': data, 'is_archived': is_archived})
+
+    @action(detail=False, methods=['post'], url_path='bulk-archive')
+    def bulk_archive(self, request):
+        classe_id = request.data.get('classe')
+        month = request.data.get('month')
+        year = request.data.get('year')
+
+        # Archive only records that have actual saved content (current_level or ahzab set)
+        updated = MonthlyReport.objects.filter(
+            student__classe_id=classe_id,
+            month=month,
+            year=year,
+            is_archived=False,
+        ).exclude(
+            current_level__isnull=True,
+            ahzab__isnull=True,
+            memorization_amount__isnull=True,
+        ).update(is_archived=True)
+
+        return Response({'archived': updated})
+
     @action(detail=False, methods=['post'], url_path='bulk-save')
     def bulk_save(self, request):
         reports = request.data
