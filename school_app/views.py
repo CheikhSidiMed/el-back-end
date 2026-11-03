@@ -2177,6 +2177,9 @@ class MonthlyReportViewSet(viewsets.ModelViewSet):
             "month": month,
             "year": year
         }
+        # When archived, only return the archived records (ignore new students added after)
+        if is_archived:
+            base_filter["is_archived"] = True
 
         prev_filter = {
             "student__classe_id": classe_id,
