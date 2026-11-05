@@ -434,6 +434,7 @@ class QuarterlyReport(models.Model):
     remarks = models.TextField(blank=True, null=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
+    is_archived = models.BooleanField(default=False)
 
     class Meta:
         unique_together = ['student', 'quarter', 'year']
@@ -540,6 +541,7 @@ class EvaluationResult(models.Model):
         related_name='evaluationresult'
     )
     created_at = models.DateTimeField(auto_now_add=True)
+    is_archived = models.BooleanField(default=False)
 
     class Meta:
         unique_together = ['student', 'period']
@@ -568,6 +570,7 @@ class EvaluationMonthResult(models.Model):
     )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+    is_archived = models.BooleanField(default=False)
 
     class Meta:
         unique_together = ['student', 'period']
@@ -1497,6 +1500,7 @@ class TehejiReport(models.Model):
     notes      = models.TextField(blank=True, default='', verbose_name='الملاحظات')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+    is_archived = models.BooleanField(default=False)
 
     class Meta:
         unique_together = ['student', 'month', 'year']

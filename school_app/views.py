@@ -1767,7 +1767,7 @@ class DailyAbsenceViewSet(viewsets.ModelViewSet):
     queryset = DailyAbsence.objects.select_related('student', 'student__classe', 'student__branche', 'student__agent').all()
     filter_backends = [DjangoFilterBackend]
     filterset_fields = {
-        'date': ['exact'],
+        'date': ['exact', 'gte', 'lte', 'month'],
         'session': ['exact'],
         'justified_absence': ['exact'],
         'student': ['exact'],
@@ -1814,7 +1814,7 @@ class EmployeeViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
 
     filter_backends = [DjangoFilterBackend]
-    filterset_fields = ['is_actif']
+    filterset_fields = ['is_actif', 'job__title']
 
     def get_queryset(self):
         user = self.request.user
@@ -2187,11 +2187,21 @@ class MonthlyReportViewSet(viewsets.ModelViewSet):
             "year": prev_year
         }
 
-        absence_filter = {
-            "student__classe_id": classe_id,
-            "date__month": month_num,
-            "currentYear": year
-        }
+        # Use actual date range from AcademicYear to avoid currentYear string inconsistencies
+        try:
+            ay = AcademicYear.objects.get(year=year)
+            absence_filter = {
+                "student__classe_id": classe_id,
+                "date__month": month_num,
+                "date__gte": ay.start_date,
+                "date__lte": ay.end_date,
+            }
+        except AcademicYear.DoesNotExist:
+            absence_filter = {
+                "student__classe_id": classe_id,
+                "date__month": month_num,
+                "currentYear": year,
+            }
 
         # =========================
         # APPLY STUDENT FILTER
@@ -2315,6 +2325,16 @@ class MonthlyReportViewSet(viewsets.ModelViewSet):
         ).update(is_archived=True)
 
         return Response({'archived': updated})
+
+    @action(detail=False, methods=['post'], url_path='bulk-unarchive')
+    def bulk_unarchive(self, request):
+        classe_id = request.data.get('classe')
+        month = request.data.get('month')
+        year = request.data.get('year')
+        updated = MonthlyReport.objects.filter(
+            student__classe_id=classe_id, month=month, year=year, is_archived=True,
+        ).update(is_archived=False)
+        return Response({'unarchived': updated})
 
     @action(detail=False, methods=['post'], url_path='bulk-save')
     def bulk_save(self, request):
@@ -2495,6 +2515,13 @@ class EvaluationResultViewSet(viewsets.ModelViewSet):
         if student_id:
             base_filter["student_id"] = student_id
 
+        is_archived = EvaluationResult.objects.filter(
+            student__classe_id=classe_id, period_id=period_id, is_archived=True
+        ).exists() if not student_id else False
+
+        if is_archived:
+            base_filter["is_archived"] = True
+
         reports_qs = EvaluationResult.objects.filter(**base_filter).select_related('student', 'period').order_by('-result')
         data = list(EvaluationResultSerializer(reports_qs, many=True).data)
 
@@ -2518,7 +2545,30 @@ class EvaluationResultViewSet(viewsets.ModelViewSet):
             for item in data:
                 item['absence_count'] = absence_map.get(item['student'], 0)
 
-        return Response(data)
+        return Response({'reports': data, 'is_archived': is_archived})
+
+    @action(detail=False, methods=['post'], url_path='bulk-archive')
+    def bulk_archive(self, request):
+        from django.db.models import Q
+        classe_id = request.data.get('classe')
+        period_id = request.data.get('period')
+        updated = EvaluationResult.objects.filter(
+            student__classe_id=classe_id, period_id=period_id, is_archived=False,
+        ).filter(
+            Q(evaluation__isnull=False) & ~Q(evaluation='') |
+            Q(elhasila__isnull=False) & ~Q(elhasila='') |
+            Q(progress__isnull=False) & ~Q(progress='')
+        ).update(is_archived=True)
+        return Response({'archived': updated})
+
+    @action(detail=False, methods=['post'], url_path='bulk-unarchive')
+    def bulk_unarchive(self, request):
+        classe_id = request.data.get('classe')
+        period_id = request.data.get('period')
+        updated = EvaluationResult.objects.filter(
+            student__classe_id=classe_id, period_id=period_id, is_archived=True,
+        ).update(is_archived=False)
+        return Response({'unarchived': updated})
 
     @action(detail=False, methods=['post'], url_path='bulk-save')
     def bulk_save(self, request):
@@ -2744,10 +2794,47 @@ class QuarterlyReportViewSet(viewsets.ModelViewSet):
         # =========================
         # RESPONSE
         # =========================
+        is_archived = QuarterlyReport.objects.filter(
+            student__classe_id=classe_id, quarter=quarter, year=year, is_archived=True
+        ).exists() if not student_id else False
+
         if student_id:
             return Response(data[0] if data else {})
 
-        return Response(data)
+        if is_archived:
+            archived_ids = set(
+                QuarterlyReport.objects.filter(
+                    student__classe_id=classe_id, quarter=quarter, year=year, is_archived=True
+                ).values_list('student_id', flat=True)
+            )
+            data = [d for d in data if d['student'] in archived_ids]
+
+        return Response({'reports': data, 'is_archived': is_archived})
+
+    @action(detail=False, methods=['post'], url_path='bulk-archive')
+    def bulk_archive(self, request):
+        from django.db.models import Q
+        classe_id = request.data.get('classe')
+        quarter = request.data.get('quarter')
+        year = request.data.get('year')
+        updated = QuarterlyReport.objects.filter(
+            student__classe_id=classe_id, quarter=quarter, year=year, is_archived=False,
+        ).filter(
+            Q(total_ahzab__gt=0) |
+            Q(extra__isnull=False) & ~Q(extra='') |
+            Q(remarks__isnull=False) & ~Q(remarks='')
+        ).update(is_archived=True)
+        return Response({'archived': updated})
+
+    @action(detail=False, methods=['post'], url_path='bulk-unarchive')
+    def bulk_unarchive(self, request):
+        classe_id = request.data.get('classe')
+        quarter = request.data.get('quarter')
+        year = request.data.get('year')
+        updated = QuarterlyReport.objects.filter(
+            student__classe_id=classe_id, quarter=quarter, year=year, is_archived=True,
+        ).update(is_archived=False)
+        return Response({'unarchived': updated})
 
     @action(detail=False, methods=['post'], url_path='bulk-save')
     def bulk_save(self, request):
@@ -3685,6 +3772,59 @@ class EvaluationMonthResultViewSet(viewsets.ModelViewSet):
             qs = qs.filter(student_id=student_id)
         return qs
 
+    @action(detail=False, methods=['get'], url_path='bulk-get')
+    def bulk_get(self, request):
+        classe_id = request.query_params.get('classe')
+        period_id = request.query_params.get('period')
+
+        is_archived = EvaluationMonthResult.objects.filter(
+            student__classe_id=classe_id, period_id=period_id, is_archived=True
+        ).exists()
+
+        qs = EvaluationMonthResult.objects.filter(
+            student__classe_id=classe_id, period_id=period_id
+        ).select_related('student')
+
+        if is_archived:
+            qs = qs.filter(is_archived=True)
+
+        data = []
+        for r in qs:
+            data.append({
+                'id': r.id,
+                'student': r.student_id,
+                'student_name': r.student.student_name,
+                'student_etat': r.student.etat,
+                'period': r.period_id,
+                'louh': r.louh,
+                'ahzab': r.ahzab,
+                'adaa': r.adaa,
+                'taqdir': r.taqdir,
+                'notes': r.notes,
+                'is_archived': r.is_archived,
+            })
+        return Response({'reports': data, 'is_archived': is_archived})
+
+    @action(detail=False, methods=['post'], url_path='bulk-archive')
+    def bulk_archive(self, request):
+        classe_id = request.data.get('classe')
+        period_id = request.data.get('period')
+        updated = EvaluationMonthResult.objects.filter(
+            student__classe_id=classe_id, period_id=period_id, is_archived=False,
+        ).exclude(
+            louh='', ahzab='', adaa='', taqdir='',
+        ).update(is_archived=True)
+        return Response({'archived': updated})
+
+    @action(detail=False, methods=['post'], url_path='bulk-unarchive')
+    def bulk_unarchive(self, request):
+        classe_id = request.data.get('classe')
+        period_id = request.data.get('period')
+        updated = EvaluationMonthResult.objects.filter(
+            student__classe_id=classe_id, period_id=period_id, is_archived=True,
+        ).update(is_archived=False)
+        return Response({'unarchived': updated})
+
     @action(detail=False, methods=['post'], url_path='bulk-save')
     def bulk_save(self, request):
         reports = request.data if isinstance(request.data, list) else request.data.get('results', [])
@@ -4607,13 +4747,18 @@ def filter_transactions(request):
     # 🔹 Utilisateur par défaut = user connecté
     user_id = request.GET.get("user_id", request.user.id)
 
+    # Bank transfers belong to the bank's owner, not the transfer creator
+    tx_user_filter = (
+        Q(transfer_ref__isnull=True, user_id=user_id) |
+        Q(transfer_ref__isnull=False, bank__user_id=user_id)
+    )
+
     # ---- Transactions dans l'intervalle ----
     transactions = Transaction.objects.filter(
         date__date__gte=start_date,
         date__date__lte=end_date,
-        user_id=user_id,
         is_paiy_month=False
-    ).order_by("date")
+    ).filter(tx_user_filter).order_by("date")
 
     serializer = TransactionSerializer(transactions, many=True)
 
@@ -4633,8 +4778,7 @@ def filter_transactions(request):
     # ---- Solde avant start_date ----
     before_tx = Transaction.objects.filter(
         date__date__lt=start_date,
-        user_id=user_id
-    )
+    ).filter(tx_user_filter)
 
     before_plus_bank = before_tx.filter(type="plus").exclude(bank__category=1)\
         .aggregate(s=Sum("paid_amount"))["s"] or 0
@@ -5349,22 +5493,17 @@ def unpaid_suspended(request):
 @api_view(['GET'])
 def class_payment_stats(request):
     branch_id = request.GET.get('branch_id')
-    month = request.GET.get('month')  # obligatoire pour ton cas
+    month = request.GET.get('month')
     year_id = request.GET.get('year_id')
 
-    if not month:
-        return Response({"error": "month est obligatoire"}, status=400)
-    today = date.today()
-    target_month = int(month) if month else today.month
-
     students = Etudiant.objects.filter(
-            is_inscrire=1, 
-            payment_nature='mensuel', 
-            etat='inscrit', 
+            is_inscrire=1,
+            payment_nature='mensuel',
+            etat='inscrit',
             is_active=True
         ).exclude(
             date_desectivation__isnull=False,
-        )
+        ).select_related('classe')
     if branch_id:
         students = students.filter(branche_id=branch_id)
 
@@ -5384,50 +5523,104 @@ def class_payment_stats(request):
         "total_unpaid": 0.0,
     })
 
-    for student in students:
-        if not student.classe:
-            continue
+    if month:
+        # ── single month ──────────────────────────────────────────────
+        target_month = int(month)
 
-        classe_name = student.classe.nom
-        monthly_fee = Decimal(student.remaining or 0)
+        for student in students:
+            if not student.classe:
+                continue
 
-        payments = Paiement.objects.filter(
-            etudiant=student,
-            month=target_month
-        )
+            classe_name = student.classe.nom
+            monthly_fee = Decimal(student.remaining or 0)
 
+            payments = Paiement.objects.filter(etudiant=student, month=target_month)
+            if academic_year:
+                payments = payments.filter(academic_year=academic_year)
+
+            if (
+                student.date_inscription.month == target_month and
+                student.date_inscription.year == (academic_year.start_date.year if academic_year else student.date_inscription.year)
+            ):
+                days_in_month = monthrange(student.date_inscription.year, target_month)[1]
+                remaining_days = days_in_month - student.date_inscription.day + 1
+                month_due = monthly_fee * Decimal(remaining_days) / Decimal(days_in_month)
+            else:
+                month_due = monthly_fee
+
+            if payments.exists():
+                month_remaining = sum(Decimal(p.remaining_amount or 0) for p in payments)
+                month_unpaid = max(month_remaining, Decimal(0))
+                month_paid = month_due - month_unpaid
+            else:
+                month_unpaid = month_due
+                month_paid = Decimal(0)
+
+            stats = class_stats[classe_name]
+            stats["class_name"] = classe_name
+            stats["total_students"] += 1
+            stats["total_due"] += float(month_due)
+            stats["total_paid"] += float(month_paid)
+            stats["total_unpaid"] += float(month_unpaid)
+
+    else:
+        # ── all months: aggregate the entire academic year ────────────
         if academic_year:
-            payments = payments.filter(academic_year=academic_year)
-
-        # 🔹 Calcul du montant dû pour CE MOIS SEULEMENT
-        if (
-            student.date_inscription.month == target_month and
-            student.date_inscription.year == (academic_year.start_date.year if academic_year else student.date_inscription.year)
-        ):
-            days_in_month = monthrange(student.date_inscription.year, target_month)[1]
-            remaining_days = days_in_month - student.date_inscription.day + 1
-            month_due = monthly_fee * Decimal(remaining_days) / Decimal(days_in_month)
+            # build ordered month list from start_date to end_date
+            months_in_year = []
+            m = academic_year.start_date.month
+            end_m = academic_year.end_date.month
+            while True:
+                months_in_year.append(m)
+                if m == end_m:
+                    break
+                m = m % 12 + 1
         else:
-            month_due = monthly_fee
+            months_in_year = [10, 11, 12, 1, 2, 3, 4, 5, 6, 7, 8, 9]
 
-        if payments.exists():
-            # 🔥 SOURCE DE VÉRITÉ
-            month_remaining = sum(
-                Decimal(p.remaining_amount or 0)
-                for p in payments
-            )
-            month_unpaid = max(month_remaining, Decimal(0))
-            month_paid = month_due - month_unpaid
-        else:
-            month_unpaid = month_due
-            month_paid = Decimal(0)
+        # prefetch all relevant payments in one query
+        all_payments_qs = Paiement.objects.filter(etudiant__in=students)
+        if academic_year:
+            all_payments_qs = all_payments_qs.filter(academic_year=academic_year)
+        payments_map = defaultdict(list)
+        for p in all_payments_qs:
+            payments_map[(p.etudiant_id, p.month)].append(p)
 
-        stats = class_stats[classe_name]
-        stats["class_name"] = classe_name
-        stats["total_students"] += 1
-        stats["total_due"] += float(month_due)
-        stats["total_paid"] += float(month_paid)
-        stats["total_unpaid"] += float(month_unpaid)
+        for student in students:
+            if not student.classe:
+                continue
+
+            classe_name = student.classe.nom
+            monthly_fee = Decimal(student.remaining or 0)
+
+            stats = class_stats[classe_name]
+            stats["class_name"] = classe_name
+            stats["total_students"] += 1
+
+            for target_m in months_in_year:
+                enroll_m = student.date_inscription.month
+                enroll_y = student.date_inscription.year
+                ay_start_y = academic_year.start_date.year if academic_year else enroll_y
+
+                if enroll_m == target_m and enroll_y == ay_start_y:
+                    days_in_month = monthrange(enroll_y, target_m)[1]
+                    remaining_days = days_in_month - student.date_inscription.day + 1
+                    month_due = monthly_fee * Decimal(remaining_days) / Decimal(days_in_month)
+                else:
+                    month_due = monthly_fee
+
+                month_payments = payments_map.get((student.id, target_m), [])
+                if month_payments:
+                    month_remaining = sum(Decimal(p.remaining_amount or 0) for p in month_payments)
+                    month_unpaid = max(month_remaining, Decimal(0))
+                    month_paid = month_due - month_unpaid
+                else:
+                    month_unpaid = month_due
+                    month_paid = Decimal(0)
+
+                stats["total_due"] += float(month_due)
+                stats["total_paid"] += float(month_paid)
+                stats["total_unpaid"] += float(month_unpaid)
 
     return Response(list(class_stats.values()))
 
@@ -5749,10 +5942,13 @@ def get_last_receipt(request):
         "student": {
             "id": receipt.student.id,
             "student_name": receipt.student.student_name,
-            "student_name": receipt.student.student_name,
             "classe": {"nom": receipt.student.classe.nom },
             "branche": {"nom": receipt.student.branche.nom },
-            "phone": receipt.student.phone,
+            "phone": (
+                receipt.student.agent.phone
+                if getattr(receipt.student, 'agent', None) and receipt.student.agent.phone
+                else receipt.student.phone
+            ) or '',
         } if receipt.student else None,
         "bank": {
             "id": payments[0].bank.id,
@@ -5931,11 +6127,18 @@ class TehejiReportViewSet(viewsets.ModelViewSet):
         month = request.query_params.get('month')
         year = request.query_params.get('year')
 
+        is_archived = TehejiReport.objects.filter(
+            student__classe_id=classe_id, month=month, year=year, is_archived=True
+        ).exists()
+
         qs = TehejiReport.objects.filter(
             student__classe_id=classe_id,
             month=month,
             year=year
         ).select_related('student')
+
+        if is_archived:
+            qs = qs.filter(is_archived=True)
 
         data = []
         for r in qs:
@@ -5952,7 +6155,29 @@ class TehejiReportViewSet(viewsets.ModelViewSet):
                 'taqdir': r.taqdir,
                 'notes': r.notes,
             })
-        return Response(data)
+        return Response({'reports': data, 'is_archived': is_archived})
+
+    @action(detail=False, methods=['post'], url_path='bulk-archive')
+    def bulk_archive(self, request):
+        classe_id = request.data.get('classe')
+        month = request.data.get('month')
+        year = request.data.get('year')
+        updated = TehejiReport.objects.filter(
+            student__classe_id=classe_id, month=month, year=year, is_archived=False,
+        ).exclude(
+            louh='', mahfouzat='', ketaba='', taqdir='',
+        ).update(is_archived=True)
+        return Response({'archived': updated})
+
+    @action(detail=False, methods=['post'], url_path='bulk-unarchive')
+    def bulk_unarchive(self, request):
+        classe_id = request.data.get('classe')
+        month = request.data.get('month')
+        year = request.data.get('year')
+        updated = TehejiReport.objects.filter(
+            student__classe_id=classe_id, month=month, year=year, is_archived=True,
+        ).update(is_archived=False)
+        return Response({'unarchived': updated})
 
     @action(detail=False, methods=['post'], url_path='bulk-save')
     def bulk_save(self, request):
