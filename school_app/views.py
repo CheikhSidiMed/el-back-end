@@ -1,4 +1,5 @@
 from django.shortcuts import render
+from django.http import HttpResponse
 from rest_framework import viewsets
 from rest_framework.response import Response
 from .models import SchoolNotification, LibraryCategory, LibraryBook, Branche, Classe, Niveau, Agent, Receipt, SalaryPayment, ReceiptPayment, PaiementTransations, Exam, AbsElmhdara, Job, Inscription, Garant, GarantPaiement, Employee, Transaction, Etudiant, Mois, Paiement, BankAccount, Receipt, ReceiptPayment, Utilisateur, Activity, AcademicYear, MonthlyReport, DailyAbsence, StudentFixedAbsence, AccountCategory, Account, Permission, Suspension, AbsenceActivity, Competition, Tasfiya, Juge, EvaluationResult, EvaluationPeriod, EvaluationMonthResult, Participant, Evaluation, CompetitionLevel, EtudiantCertified, QuarterlyReport, Attestation, ExitCertificate, DeliveryReceipt, DeliveryPeriod, PushSubscription, TehejiReport, StudentClassHistory
@@ -10,6 +11,7 @@ from rest_framework.decorators import api_view, permission_classes, action
 
 from calendar import monthrange
 from collections import defaultdict
+from .contract_pdf import generate_contract_pdf
 from rest_framework.views import APIView
 from dateutil.relativedelta import relativedelta
 
@@ -1926,6 +1928,19 @@ class EmployeeViewSet(viewsets.ModelViewSet):
             },
             status=status.HTTP_200_OK
         )
+
+    @action(detail=True, methods=['get'], url_path='contract')
+    def contract_pdf_view(self, request, pk=None):
+        """GET /api/employees/{id}/contract/ → returns PDF file."""
+        employee = self.get_object()
+        try:
+            pdf_bytes = generate_contract_pdf(employee)
+        except Exception as e:
+            return Response({"error": str(e)}, status=500)
+        filename = f"contract_{employee.id}_{employee.full_name.replace(' ', '_')}.pdf"
+        response = HttpResponse(pdf_bytes, content_type="application/pdf")
+        response["Content-Disposition"] = f'inline; filename="{filename}"'
+        return response
 
     @action(detail=True, methods=['post'], url_path='dismiss')
     def dismiss_employee(self, request, pk=None):
@@ -6197,3 +6212,41 @@ class TehejiReportViewSet(viewsets.ModelViewSet):
                     }
                 )
         return Response({'saved': len(records)})
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def agent_unpaid_cards_summary(request):
+    """
+    Summary of payment status for the logged-in agent's students.
+    Optional ?month=<1-12> to filter to a specific month.
+    Returns: { total_paid, total_unpaid, student_count }
+    """
+    agent = getattr(request.user, 'agent_profile', None)
+    if not agent:
+        return Response({'detail': 'Not an agent account.'}, status=403)
+
+    month = request.GET.get('month')
+    if month in (None, '', 'null', 'undefined'):
+        month = None
+    else:
+        try:
+            month = int(month)
+        except (ValueError, TypeError):
+            month = None
+
+    students = Etudiant.objects.filter(agent=agent, is_inscrire=1)
+    student_ids = list(students.values_list('id', flat=True))
+
+    payments_qs = Paiement.objects.filter(etudiant_id__in=student_ids)
+    if month is not None:
+        payments_qs = payments_qs.filter(month=month)
+
+    total_paid      = payments_qs.aggregate(s=Sum('paid_amount'))['s'] or 0
+    total_unpaid    = payments_qs.aggregate(s=Sum('remaining_amount'))['s'] or 0
+
+    return Response({
+        'total_paid':    float(total_paid),
+        'total_unpaid':  float(total_unpaid),
+        'student_count': students.count(),
+    })

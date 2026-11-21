@@ -76,6 +76,7 @@ urlpatterns = [
     path('api/preview/filter/', filter_transactions_account, name='filter-dailly'),
     path('api/unpaid-students/', unpaid_students, name='unpaid-students'),
     path('api/unpaid-by-agent/', unpaid_by_agent, name='unpaid-by-agents'),
+    path('agent-unpaid-cards/summary/', agent_unpaid_cards_summary, name='agent-unpaid-cards-summary'),
     path('api/unpaid-suspended/', unpaid_suspended, name='unpaid-suspended'),
     path('api/quick-pay/', quick_pay, name='quick-pay'),
     path('api/unpaid-dont-have-agent/', unpaid_students_not_have_agent, name='unpaid-dont-have-agents'),
