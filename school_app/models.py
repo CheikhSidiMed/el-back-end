@@ -557,10 +557,10 @@ class EvaluationMonthResult(models.Model):
         on_delete=models.CASCADE,
         related_name='month_results'
     )
-    louh = models.CharField(max_length=100, blank=True, null=True)          # اللوح
-    ahzab = models.CharField(max_length=100, blank=True, null=True)         # عدد الأحزاب
-    adaa = models.CharField(max_length=100, blank=True, null=True)          # مستوى الأداء
-    taqdir = models.CharField(max_length=100, blank=True, null=True)        # التقدير النهائي
+    louh = models.TextField(blank=True, null=True)          # اللوح
+    ahzab = models.TextField(blank=True, null=True)         # عدد الأحزاب
+    adaa = models.TextField(blank=True, null=True)          # مستوى الأداء
+    taqdir = models.TextField(blank=True, null=True)        # التقدير النهائي
     notes = models.TextField(blank=True, null=True)                         # ملاحظات
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
