@@ -3656,6 +3656,7 @@ class AgentPortalViewSet(viewsets.ViewSet):
             'whatsapp_phone': agent.whatsapp_phone,
             'profession': agent.profession,
             'user_first_name': request.user.first_name or '',
+            'active_students': active_agent_students(agent).count(),
         })
 
     @action(detail=False, methods=['get'], url_path='notifications')
@@ -4753,6 +4754,33 @@ def restore_balances_on_delete(sender, instance, **kwargs):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def filter_transactions(request):
+    return Response(_dailly_report(request))
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def dailly_pdf(request):
+    """GET /api/daillys/pdf/?start_date=&end_date=&user_id= → the daily report as a PDF."""
+    from .dailly_pdf import generate_dailly_pdf
+
+    report = _dailly_report(request)
+    username = None
+    if request.GET.get("user_id"):   # same rule as the old print: name only when a user is selected
+        u = Utilisateur.objects.filter(id=request.GET["user_id"]).first()
+        username = (u.first_name or u.phone) if u else None
+    f = report["filters"]
+    # f["start_date"] / f["end_date"] are the dates actually used (today when none was chosen)
+    pdf_bytes = generate_dailly_pdf(
+        report["transactions"], report["totals"], report["before_balance"],
+        f["start_date"], f["end_date"], username,
+    )
+    response = HttpResponse(pdf_bytes, content_type="application/pdf")
+    response["Content-Disposition"] = f'inline; filename="dailly_{f["start_date"]}_{f["end_date"]}.pdf"'
+    return response
+
+
+def _dailly_report(request):
+    """Data of the daily report — shared by the JSON endpoint and the PDF."""
     today = date.today()
 
     # 🔹 Dates par défaut = aujourd’hui
@@ -4807,7 +4835,7 @@ def filter_transactions(request):
     before_minus_fund = before_tx.filter(type="minus", bank__category=1)\
         .aggregate(s=Sum("paid_amount"))["s"] or 0
 
-    return Response({
+    return {
         "filters": {
             "start_date": str(start_date),
             "end_date": str(end_date),
@@ -4834,7 +4862,7 @@ def filter_transactions(request):
                 (before_plus_bank - before_minus_bank)
             )
         }
-    })
+    }
 
 
 @api_view(['GET'])

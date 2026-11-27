@@ -9,7 +9,24 @@ from datetime import date
 from django.contrib.postgres.fields import JSONField 
 from django.db.models import JSONField
 from django.db.models import Max
+import re
 import uuid
+
+
+# Mauritanian number written with its country code: 00222XXXXXXXX, +222XXXXXXXX or 222XXXXXXXX
+_MR_PREFIXED_PHONE = re.compile(r'^(?:\+|00)?222(\d{8})$')
+
+
+def normalize_mr_phone(value):
+    """Store Mauritanian numbers as the local 8 digits: '0022221212123' → '21212123'.
+
+    Only strips the prefix when exactly 8 digits remain, so a local number that itself
+    starts with 222 (e.g. '22245678') and foreign numbers ('00221…') are left untouched.
+    """
+    if not value:
+        return value
+    m = _MR_PREFIXED_PHONE.match(re.sub(r'[\s\-]', '', str(value)))
+    return m.group(1) if m else value
 import os
 
 def upload_student_photo(instance, filename):
@@ -199,7 +216,8 @@ class Niveau(models.Model):
         return self.level_name
 
 class Agent(models.Model):
-    # phone stored as-is (may include 00222 prefix); kept unique
+    # Mauritanian numbers are stored WITHOUT the 00222 prefix (see normalize_mr_phone);
+    # foreign numbers keep their 00XXX prefix. phone is unique.
     agent_name = models.CharField(max_length=100)
     phone = models.CharField(max_length=20, unique=True)
     phone_2 = models.CharField(max_length=20, null=True, blank=True)
@@ -209,6 +227,12 @@ class Agent(models.Model):
 
     class Meta:
         ordering = ['-id']
+
+    def save(self, *args, **kwargs):
+        self.phone = normalize_mr_phone(self.phone)
+        self.phone_2 = normalize_mr_phone(self.phone_2)
+        self.whatsapp_phone = normalize_mr_phone(self.whatsapp_phone)
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return self.agent_name
@@ -1509,3 +1533,84 @@ class TehejiReport(models.Model):
 
     def __str__(self):
         return f"{self.student.student_name} - {self.month} {self.year}"
+
+
+# ─────────────────────────────────────────────
+# إدارة المهام
+# ─────────────────────────────────────────────
+class Task(models.Model):
+    PRIORITY_CHOICES = [
+        ('normal', 'عادية'),
+        ('medium', 'متوسطة'),
+        ('high', 'عالية'),
+        ('urgent', 'عاجلة'),
+    ]
+    # «متأخرة» status is derived from due_date (see is_overdue), not stored.
+    STATUS_NEW = 'new'
+    STATUS_IN_PROGRESS = 'in_progress'
+    STATUS_COMPLETED = 'completed'
+    STATUS_CANCELLED = 'cancelled'
+    STATUS_CHOICES = [
+        (STATUS_NEW, 'جديدة'),
+        (STATUS_IN_PROGRESS, 'قيد التنفيذ'),
+        (STATUS_COMPLETED, 'مكتملة'),
+        (STATUS_CANCELLED, 'ملغاة'),
+    ]
+    OPEN_STATUSES = (STATUS_NEW, STATUS_IN_PROGRESS)
+    DURATION_CHOICES = [
+        ('1d', 'خلال يوم'),
+        ('3d', '3 أيام'),
+        ('7d', 'أسبوع'),
+        ('custom', 'مدة مخصصة'),
+    ]
+
+    title = models.CharField(max_length=200, verbose_name='عنوان المهمة')
+    description = models.TextField(blank=True, default='', verbose_name='الوصف')
+    assigned_to = models.ForeignKey(
+        Utilisateur, on_delete=models.PROTECT, related_name='tasks', verbose_name='المسؤول'
+    )
+    created_by = models.ForeignKey(
+        Utilisateur, on_delete=models.SET_NULL, null=True, blank=True, related_name='created_tasks'
+    )
+    start_date = models.DateTimeField(verbose_name='تاريخ البداية')
+    due_date = models.DateTimeField(verbose_name='تاريخ الانتهاء المتوقع')
+    assigned_at = models.DateTimeField(default=timezone.now, verbose_name='تاريخ الإسناد')
+    duration_preset = models.CharField(max_length=10, choices=DURATION_CHOICES, default='custom')
+    priority = models.CharField(max_length=10, choices=PRIORITY_CHOICES, default='normal')
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_NEW)
+    progress = models.PositiveSmallIntegerField(default=0)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['due_date']
+        verbose_name = 'مهمة'
+
+    @property
+    def is_overdue(self):
+        return self.status in self.OPEN_STATUSES and self.due_date < timezone.now()
+
+    def __str__(self):
+        return self.title
+
+
+class TaskNotification(models.Model):
+    KIND_CHOICES = [
+        ('assigned', 'إسناد مهمة'),
+        ('due_soon', 'اقتراب الموعد'),
+        ('due_now', 'حلول الموعد'),
+    ]
+
+    user = models.ForeignKey(Utilisateur, on_delete=models.CASCADE, related_name='task_notifications')
+    task = models.ForeignKey(Task, on_delete=models.CASCADE, related_name='notifications')
+    kind = models.CharField(max_length=20, choices=KIND_CHOICES)
+    is_read = models.BooleanField(default=False)
+    created_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        ordering = ['-created_at']
+        unique_together = ['user', 'task', 'kind']
+
+    def __str__(self):
+        return f"{self.user} - {self.task} ({self.kind})"

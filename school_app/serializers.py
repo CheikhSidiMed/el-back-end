@@ -1,5 +1,6 @@
 from rest_framework import serializers
 from .models import SchoolNotification, LibraryCategory, LibraryBook, Branche, Classe, Niveau, Agent, Etudiant, Mois, Exam, Paiement, Inscription, Garant, Attestation, GarantPaiement, SalaryPayment, Employee, Job, BankAccount, Receipt, ReceiptPayment, Utilisateur, Activity, AcademicYear, MonthlyReport, DailyAbsence, StudentFixedAbsence, AccountCategory, Account, Transaction, Permission, Suspension, AbsenceActivity, AbsElmhdara, Competition, Tasfiya, Juge, Participant, Evaluation, CompetitionLevel, PaiementTransations, EtudiantCertified, QuarterlyReport, EvaluationResult, EvaluationPeriod, EvaluationMonthResult, ExitCertificate, DeliveryReceipt, DeliveryPeriod, TehejiReport
+from .models import normalize_mr_phone
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from rest_framework_simplejwt.exceptions import AuthenticationFailed as JWTAuthFailed
 
@@ -73,6 +74,8 @@ class AgentSerializer(serializers.ModelSerializer):
         return hasattr(obj, 'user_account') and obj.user_account is not None
 
     def validate_phone(self, value):
+        # Normalize first so '0022221212123' is caught as a duplicate of '21212123'.
+        value = normalize_mr_phone(value)
         qs = Agent.objects.filter(phone=value)
         if self.instance:
             qs = qs.exclude(pk=self.instance.pk)
@@ -82,6 +85,12 @@ class AgentSerializer(serializers.ModelSerializer):
                 f'رقم الهاتف مستخدم مسبقاً من قبل الوكيل: {existing.agent_name}'
             )
         return value
+
+    def validate_phone_2(self, value):
+        return normalize_mr_phone(value)
+
+    def validate_whatsapp_phone(self, value):
+        return normalize_mr_phone(value)
 
     class Meta:
         model = Agent
@@ -595,6 +604,11 @@ class BankTransferSerializer(serializers.Serializer):
 
         return data
 
+def active_agent_students(agent):
+    """Students that count as 'active' for an agent: enrolled and not suspended."""
+    return Etudiant.objects.filter(agent=agent, is_inscrire=1).exclude(etat='suspendu')
+
+
 class MyTokenObtainPairSerializer(TokenObtainPairSerializer):
     @classmethod
     def get_token(cls, user: Utilisateur):
@@ -621,6 +635,16 @@ class MyTokenObtainPairSerializer(TokenObtainPairSerializer):
             raise
         except Exception:
             raise JWTAuthFailed("رقم الهاتف أو كلمة المرور غير صحيحة")
+
+        # Agent mobile app (Flutter) sends app="agent_mobile": only agent accounts with
+        # at least one active student may log in there — staff roles are NOT exempt.
+        request = self.context.get('request')
+        if request is not None and request.data.get('app') == 'agent_mobile':
+            agent = getattr(self.user, 'agent_profile', None)
+            if agent is None:
+                raise serializers.ValidationError("لا يمكنك تسجيل الدخول: هذا الحساب ليس حساب وكيل.")
+            if not active_agent_students(agent).exists():
+                raise serializers.ValidationError("لا يمكنك تسجيل الدخول: لا يوجد لديك طلاب نشطون.")
 
         # Block agent login if they have no students or all students are suspended.
         # Skip this check for users who also hold an admin/staff role.

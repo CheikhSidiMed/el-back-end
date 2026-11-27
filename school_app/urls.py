@@ -1,6 +1,7 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from .views import *
+from .task_views import TaskViewSet, TaskNotificationViewSet
 from rest_framework_simplejwt.views import TokenRefreshView
 
 router = DefaultRouter()
@@ -67,11 +68,14 @@ router.register('attestations', AttestationViewSet, basename="attestations")
 router.register('exit-certificates', ExitCertificateViewSet, basename="exit-certificate")
 router.register('evaluation-month-results', EvaluationMonthResultViewSet, basename="evaluation-month-result")
 router.register('agent-portal', AgentPortalViewSet, basename="agent-portal")
+router.register(r'tasks', TaskViewSet, basename='task')
+router.register(r'task-notifications', TaskNotificationViewSet, basename='task-notification')
 
 urlpatterns = [
     path('', include(router.urls)),
     path('api/daily-absence/par-month', daily_absence_list, name='daily-absence-by-month'),
     path('api/daillys/filter/', filter_transactions, name='filter-dailly'),
+    path('api/daillys/pdf/', dailly_pdf, name='dailly-pdf'),
     path('api/filter/transations-modifier/', filter_transactions_modfier, name='filter-dailly'),
     path('api/preview/filter/', filter_transactions_account, name='filter-dailly'),
     path('api/unpaid-students/', unpaid_students, name='unpaid-students'),
