@@ -11,6 +11,7 @@ from .models import (
     Competition, Tasfiya, Juge, Participant, Evaluation
 )
 
+
 admin.site.register(Branche)
 admin.site.register(Classe)
 admin.site.register(Niveau)
